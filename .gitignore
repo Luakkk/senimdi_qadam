@@ -1,0 +1,18 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+
+# Env
+.env
+.env.*
+!*.example
+
+# Prisma
+prisma/dev.db
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/

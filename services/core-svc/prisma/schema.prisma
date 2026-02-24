@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgStatus {
+  DRAFT
+  PENDING
+  VERIFIED
+  ARCHIVED
+}
+
+model Organization {
+  id            String   @id @default(uuid())
+  name          String
+  type          String
+  description   String?  @db.Text
+  city          String   @default("Almaty")
+  district      String?
+  address       String?
+  phone         String?
+  website       String?
+  whatsapp      String?
+  telegram      String?
+
+  accessRamp    Boolean  @default(false)
+  accessLift    Boolean  @default(false)
+  onlineConsult Boolean  @default(false)
+  wheelchair    Boolean  @default(false)
+
+  status        OrgStatus @default(DRAFT)
+  verifiedAt    DateTime?
+  verifiedBy    String?
+
+  lat           Float?
+  lon           Float?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  verificationLogs VerificationLog[]
+}
+
+model VerificationLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  statusFrom     OrgStatus
+  statusTo       OrgStatus
+  method         String
+  moderatorId    String?
+  comment        String?  @db.Text
+  createdAt      DateTime @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
