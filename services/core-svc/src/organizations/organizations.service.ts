@@ -1,44 +1,41 @@
-import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { ListOrganizationsQuery } from './dto/list-organizations.query';
+import { OrgStatus } from '@prisma/client';
 
-@Injectable()
-export class OrganizationsService {
-  constructor(private readonly prisma: PrismaService) {}
+function toRad(x: number) {
+  return (x * Math.PI) / 180;
+}
 
-  async list(query: ListOrganizationsQuery) {
-    const limit = Math.min(query.limit ?? 20, 50);
-    const offset = query.offset ?? 0;
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
-    const where: any = {};
+async nearby(params: { lat: number; lon: number; radius: number; verified?: boolean }) {
+  const { lat, lon, radius, verified } = params;
 
-    if (query.type) where.type = query.type;
-    if (query.district) where.district = query.district;
+  const where: any = {
+    lat: { not: null },
+    lon: { not: null },
+  };
+  if (verified) where.status = OrgStatus.VERIFIED;
 
-    if (query.verified === 'true') where.status = 'VERIFIED';
-    if (query.verified === 'false') where.status = { not: 'VERIFIED' };
+  const orgs = await this.prisma.organization.findMany({
+    where,
+    take: 500,
+    orderBy: { updatedAt: 'desc' },
+  });
 
-    if (query.q) {
-      where.OR = [
-        { name: { contains: query.q, mode: 'insensitive' } },
-        { description: { contains: query.q, mode: 'insensitive' } },
-      ];
-    }
-
-    const [items, total] = await this.prisma.$transaction([
-      this.prisma.organization.findMany({
-        where,
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-        skip: offset,
-      }),
-      this.prisma.organization.count({ where }),
-    ]);
-
-    return { items, total, limit, offset };
-  }
-
-  async getById(id: string) {
-    return this.prisma.organization.findUnique({ where: { id } });
-  }
+  return orgs
+    .map((o) => ({
+      ...o,
+      distanceMeters: Math.round(haversineMeters(lat, lon, o.lat!, o.lon!)),
+    }))
+    .filter((o) => o.distanceMeters <= radius)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 30);
 }
