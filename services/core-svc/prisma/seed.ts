@@ -1,13 +1,12 @@
-import { PrismaClient, OrgStatus } from '@prisma/client';
+import { PrismaClient, OrgStatus, Prisma } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // ДЕМО: каждый раз делаем чистую базу организаций
   await prisma.verificationLog.deleteMany({});
   await prisma.organization.deleteMany({});
 
-  const items = [
+  const items: Prisma.OrganizationCreateManyInput[] = [
     {
       name: 'КГУ "Центр социальных услуг Демеу"',
       type: 'social',
@@ -50,9 +49,9 @@ async function main() {
     },
   ];
 
-  // Добиваем до 20 “копиями” (для nearby и каталога)
   while (items.length < 20) {
     const base = items[items.length % 3];
+
     items.push({
       ...base,
       name: `${base.name} #${items.length + 1}`,
@@ -65,7 +64,3 @@ async function main() {
   await prisma.organization.createMany({ data: items });
   console.log(`Seed OK: ${items.length} organizations`);
 }
-
-main()
-  .catch((e) => { console.error(e); process.exit(1); })
-  .finally(async () => { await prisma.$disconnect(); });

@@ -15,50 +15,54 @@ enum OrgStatus {
 }
 
 model Organization {
-  id            String   @id @default(uuid())
-  name          String
-  type          String
-  description   String?  @db.Text
-  city          String   @default("Almaty")
-  district      String?
-  address       String?
-  phone         String?
-  website       String?
-  whatsapp      String?
-  telegram      String?
+  id          String  @id @default(uuid())
+  name        String
+  type        String
+  description String? @db.Text
+  city        String  @default("Almaty")
+  district    String?
+  address     String?
+  phone       String?
+  website     String?
+  whatsapp    String?
+  telegram    String?
 
-  accessRamp    Boolean  @default(false)
-  accessLift    Boolean  @default(false)
-  onlineConsult Boolean  @default(false)
-  wheelchair    Boolean  @default(false)
+  accessRamp    Boolean @default(false)
+  accessLift    Boolean @default(false)
+  onlineConsult Boolean @default(false)
+  wheelchair    Boolean @default(false)
 
-  status        OrgStatus @default(DRAFT)
-  verifiedAt    DateTime?
-  verifiedBy    String?
+  status     OrgStatus @default(DRAFT)
+  verifiedAt DateTime?
+  verifiedBy String?
 
-  lat           Float?
-  lon           Float?
+  lat Float?
+  lon Float?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   verificationLogs VerificationLog[]
+
+  complaints Complaint[]
+  tickets    Ticket[]
 }
 
 model VerificationLog {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   organizationId String
   statusFrom     OrgStatus
   statusTo       OrgStatus
   method         String
   moderatorId    String?
-  comment        String?  @db.Text
-  createdAt      DateTime @default(now())
+  comment        String?   @db.Text
+  createdAt      DateTime  @default(now())
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
 }
+
 enum ComplaintStatus {
   OPEN
   IN_REVIEW
@@ -66,18 +70,18 @@ enum ComplaintStatus {
 }
 
 model Complaint {
-  id             String          @id @default(cuid())
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  userId         String?
-  role           String?
-  message        String
-  contact        String?
-  status         ComplaintStatus @default(OPEN)
+  userId  String?
+  role    String?
+  message String
+  contact String?
+  status  ComplaintStatus @default(OPEN)
 
   organizationId String?
-  organization   Organization?   @relation(fields: [organizationId], references: [id])
+  organization   Organization? @relation(fields: [organizationId], references: [id])
 
   @@index([status])
   @@index([organizationId])
@@ -90,16 +94,16 @@ enum TicketStatus {
 }
 
 model Ticket {
-  id             String       @id @default(cuid())
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  userId         String?
-  role           String?
-  title          String
-  description    String
-  contact        String?
-  status         TicketStatus @default(OPEN)
+  userId      String?
+  role        String?
+  title       String
+  description String
+  contact     String?
+  status      TicketStatus @default(OPEN)
 
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])

@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { OrgStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -26,13 +27,15 @@ export class AdminOrganizationsService {
     const org = await this.prisma.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
 
+    const statusTo = dto.statusTo;
+
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.organization.update({
         where: { id },
         data: {
-          status: 'VERIFIED',
-          verifiedAt: new Date(),
-          verifiedBy: dto.moderatorId ?? null,
+          status: statusTo,
+          verifiedAt: statusTo === OrgStatus.VERIFIED ? new Date() : null,
+          verifiedBy: statusTo === OrgStatus.VERIFIED ? dto.moderatorId ?? null : null,
         } as any,
       });
 
@@ -40,7 +43,7 @@ export class AdminOrganizationsService {
         data: {
           organizationId: id,
           statusFrom: org.status,
-          statusTo: 'VERIFIED',
+          statusTo,
           method: dto.method,
           moderatorId: dto.moderatorId ?? null,
           comment: dto.comment ?? null,
