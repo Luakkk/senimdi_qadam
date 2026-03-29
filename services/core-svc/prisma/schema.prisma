@@ -1,3 +1,7 @@
+// ===================================================
+// SenimdiQAdam — core-svc Prisma Schema
+// ===================================================
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,107 +11,361 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  USER
+  RELATIVE
+  ORG_MANAGER
+  MODERATOR
+  ADMIN
+}
+
+enum DisabilityType {
+  VISUAL
+  HEARING
+  MOBILITY
+  COGNITIVE
+  SPEECH
+  OTHER
+}
+
+enum OrgCategory {
+  REHABILITATION
+  EDUCATION
+  MEDICAL
+  LEGAL
+  SOCIAL
+  SPORT
+  CULTURE
+  EMPLOYMENT
+  OTHER
+}
+
 enum OrgStatus {
-  DRAFT
   PENDING
   VERIFIED
-  ARCHIVED
-}
-
-model Organization {
-  id          String  @id @default(uuid())
-  name        String
-  type        String
-  description String? @db.Text
-  city        String  @default("Almaty")
-  district    String?
-  address     String?
-  phone       String?
-  website     String?
-  whatsapp    String?
-  telegram    String?
-
-  accessRamp    Boolean @default(false)
-  accessLift    Boolean @default(false)
-  onlineConsult Boolean @default(false)
-  wheelchair    Boolean @default(false)
-
-  status     OrgStatus @default(DRAFT)
-  verifiedAt DateTime?
-  verifiedBy String?
-
-  lat Float?
-  lon Float?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  verificationLogs VerificationLog[]
-
-  complaints Complaint[]
-  tickets    Ticket[]
-}
-
-model VerificationLog {
-  id             String    @id @default(uuid())
-  organizationId String
-  statusFrom     OrgStatus
-  statusTo       OrgStatus
-  method         String
-  moderatorId    String?
-  comment        String?   @db.Text
-  createdAt      DateTime  @default(now())
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId])
-}
-
-enum ComplaintStatus {
-  OPEN
-  IN_REVIEW
-  RESOLVED
-}
-
-model Complaint {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  userId  String?
-  role    String?
-  message String
-  contact String?
-  status  ComplaintStatus @default(OPEN)
-
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-
-  @@index([status])
-  @@index([organizationId])
+  REJECTED
+  SUSPENDED
 }
 
 enum TicketStatus {
   OPEN
   IN_PROGRESS
-  DONE
+  RESOLVED
+  CLOSED
+}
+
+enum ComplaintStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  role         Role     @default(USER)
+  isVerified   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  googleId     String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile          UserProfile?
+  asGuardian       RelativeLink[]      @relation("GuardianLinks")
+  asDependent      RelativeLink[]      @relation("DependentLinks")
+  managedOrgs      Organization[]      @relation("OrgManager")
+  savedOrgs        SavedOrganization[]
+  tickets          Ticket[]
+  complaints       Complaint[]
+  verificationLogs VerificationLog[]
+  news             News[]
+  reviewsWritten   SpecialistReview[]  @relation("ReviewsWritten")
+  reviewsReceived  SpecialistReview[]  @relation("ReviewsReceived")
+}
+
+model UserProfile {
+  id             String          @id @default(uuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String
+  phone          String?
+  birthDate      DateTime?
+  city           String?
+  disabilityType DisabilityType?
+  disabilityNote String?
+  avatarUrl      String?
+  lat            Float?          // геолокация пользователя
+  lon            Float?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model RelativeLink {
+  id          String   @id @default(uuid())
+  guardianId  String
+  dependentId String
+  label       String?
+  isAccepted  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  guardian  User @relation("GuardianLinks",  fields: [guardianId],  references: [id])
+  dependent User @relation("DependentLinks", fields: [dependentId], references: [id])
+
+  @@unique([guardianId, dependentId])
+}
+
+model Organization {
+  id           String      @id @default(uuid())
+  nameRu       String
+  nameKk       String?
+  nameEn       String?
+  category     OrgCategory @default(OTHER)
+  status       OrgStatus   @default(PENDING)
+  description  String?
+  address      String?
+  city         String      @default("Алматы")
+  phone        String?
+  email        String?
+  website      String?
+  instagram    String?
+  lat          Float?
+  lon          Float?
+  managerId    String?
+  manager      User?       @relation("OrgManager", fields: [managerId], references: [id])
+  isAccessible Boolean     @default(true)
+  workingHours String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  verificationLogs VerificationLog[]
+  savedBy          SavedOrganization[]
+  reviews          OrgReview[]
+  ratingAvg        Float?   // средний рейтинг (обновляется при каждом отзыве)
+  ratingCount      Int      @default(0) // кол-во отзывов
+
+  // Highload: индексы для быстрой фильтрации
+  @@index([category])
+  @@index([status])
+  @@index([city])
+  @@index([lat, lon])
+}
+
+model SavedOrganization {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  createdAt      DateTime     @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model VerificationLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  moderatorId    String?
+  moderator      User?        @relation(fields: [moderatorId], references: [id])
+  status         OrgStatus
+  comment        String?
+  createdAt      DateTime     @default(now())
 }
 
 model Ticket {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  subject    String
+  body       String
+  status     TicketStatus @default(OPEN)
+  assigneeId String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
-  userId      String?
-  role        String?
-  title       String
-  description String
-  contact     String?
-  status      TicketStatus @default(OPEN)
-
-  organizationId String?
-  organization   Organization? @relation(fields: [organizationId], references: [id])
-
+  @@index([userId])
   @@index([status])
-  @@index([organizationId])
+}
+
+model Complaint {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  targetType  String
+  targetId    String
+  reason      String
+  description String?
+  status      ComplaintStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ───────────────────────────────────────────────────
+// ОТЗЫВЫ НА ОРГАНИЗАЦИИ (рейтинг 1-5)
+// ───────────────────────────────────────────────────
+
+model OrgReview {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String       // автор отзыва (из core User)
+  rating         Int          // 1, 2, 3, 4 или 5
+  comment        String?      // текст отзыва (необязательно)
+  isVerified     Boolean      @default(false) // модератор подтвердил отзыв
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, userId]) // один отзыв на организацию от одного юзера
+  @@index([organizationId])          // быстрый список отзывов по организации
+}
+
+// ───────────────────────────────────────────────────
+// НОВОСТИ (пользователи публикуют сами)
+// ───────────────────────────────────────────────────
+
+enum NewsStatus {
+  DRAFT       // черновик
+  PENDING     // ждёт модерации
+  PUBLISHED   // опубликовано
+  REJECTED    // отклонено модератором
+}
+
+model News {
+  id           String     @id @default(uuid())
+  authorId     String
+  author       User       @relation(fields: [authorId], references: [id])
+  titleRu      String
+  titleKk      String?
+  bodyRu       String
+  bodyKk       String?
+  imageUrl     String?
+  status       NewsStatus @default(PENDING)
+  rejectReason String?    // причина отклонения модератором
+  publishedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Денормализованные счётчики (highload — не делаем COUNT() на каждый запрос)
+  likesCount    Int @default(0)
+  commentsCount Int @default(0)
+
+  likes    NewsLike[]
+  comments NewsComment[]
+
+  // Highload: индексы для быстрой фильтрации
+  @@index([status])
+  @@index([authorId])
+  @@index([publishedAt])
+  @@index([likesCount])  // для сортировки по популярности
+}
+
+// ───────────────────────────────────────────────────
+// ЛАЙКИ НА НОВОСТИ
+// ───────────────────────────────────────────────────
+
+model NewsLike {
+  id        String   @id @default(uuid())
+  newsId    String
+  news      News     @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([newsId, userId])  // один лайк от одного юзера
+  @@index([newsId])
+}
+
+// ───────────────────────────────────────────────────
+// КОММЕНТАРИИ К НОВОСТЯМ (с модерацией)
+// ───────────────────────────────────────────────────
+
+enum NewsCommentStatus {
+  PENDING    // ждёт модерации
+  PUBLISHED  // одобрен
+  REJECTED   // отклонён
+}
+
+model NewsComment {
+  id        String            @id @default(uuid())
+  newsId    String
+  news      News              @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  authorId  String
+  text      String
+  status    NewsCommentStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([newsId, status])  // быстрый список одобренных комментариев к новости
+  @@index([status])          // очередь модерации
+}
+
+// ───────────────────────────────────────────────────
+// ГАЙДЫ / ТУТОРИАЛЫ
+// ───────────────────────────────────────────────────
+
+// ───────────────────────────────────────────────────
+// ОТЗЫВЫ НА ДОКТОРОВ / СПЕЦИАЛИСТОВ (рейтинг 1-5)
+// ───────────────────────────────────────────────────
+
+model SpecialistReview {
+  id           String   @id @default(uuid())
+  targetUserId String   // id доктора/специалиста (User с ролью ORG_MANAGER или ADMIN)
+  targetUser   User     @relation("ReviewsReceived", fields: [targetUserId], references: [id])
+  authorId     String   // кто оставил отзыв
+  author       User     @relation("ReviewsWritten", fields: [authorId], references: [id])
+  rating       Int      // 1, 2, 3, 4 или 5
+  comment      String?  // текст отзыва
+  isVerified   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([targetUserId, authorId]) // один отзыв на специалиста от одного юзера
+}
+
+// ───────────────────────────────────────────────────
+// ГАЙДЫ / ТУТОРИАЛЫ
+// ───────────────────────────────────────────────────
+
+model Guide {
+  id          String   @id @default(uuid())
+  titleRu     String
+  titleKk     String?
+  bodyRu      String
+  bodyKk      String?
+  category    String?
+  tags        String[]
+  isPublished Boolean  @default(false)
+  authorId    String?
+  likesCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  likes GuideLike[]
+
+  // Highload: индексы для быстрой фильтрации
+  @@index([isPublished])
+  @@index([category])
+  @@index([likesCount])
+}
+
+// ───────────────────────────────────────────────────
+// ЛАЙКИ НА ГАЙДЫ
+// ───────────────────────────────────────────────────
+
+model GuideLike {
+  id        String   @id @default(uuid())
+  guideId   String
+  guide     Guide    @relation(fields: [guideId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([guideId, userId])
+  @@index([guideId])
+  @@index([userId])
 }

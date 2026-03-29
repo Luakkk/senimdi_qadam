@@ -1,11 +1,11 @@
 import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiHeader, ApiTags } from '@nestjs/swagger';
+import { TicketStatus } from '@prisma/client';
 import { AdminGuard } from '../../auth/admin.guard';
 import { TicketsService } from '../../tickets/tickets.service';
 
 @ApiTags('admin/tickets')
 @ApiHeader({ name: 'x-admin-key', required: true })
-@ApiHeader({ name: 'x-role', required: false, description: 'ADMIN' })
 @UseGuards(AdminGuard)
 @Controller('admin/tickets')
 export class AdminTicketsController {
@@ -13,11 +13,12 @@ export class AdminTicketsController {
 
   @Get()
   list() {
-    return this.service.listAll();
+    return this.service.listAll(100, 0);
   }
 
+  // TicketStatus: OPEN | IN_PROGRESS | RESOLVED | CLOSED
   @Patch(':id')
-  setStatus(@Param('id') id: string, @Body() body: { status: 'OPEN' | 'IN_PROGRESS' | 'DONE' }) {
-    return this.service.setStatus(id, body.status);
+  setStatus(@Param('id') id: string, @Body() body: { status: TicketStatus }) {
+    return this.service.updateStatus(id, body.status);
   }
 }

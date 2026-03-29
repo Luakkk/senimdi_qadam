@@ -2,18 +2,22 @@ import { Transform } from 'class-transformer';
 import { IsBooleanString, IsOptional, IsString } from 'class-validator';
 
 export class ListOrganizationsQuery {
+  // Поиск по названию (nameRu)
   @IsOptional()
   @IsString()
   q?: string;
 
+  // Фильтр по категории (OrgCategory enum): REHABILITATION | EDUCATION | MEDICAL | LEGAL | SOCIAL | SPORT | CULTURE | EMPLOYMENT | OTHER
   @IsOptional()
   @IsString()
-  type?: string;
+  category?: string;
 
+  // Фильтр по городу
   @IsOptional()
   @IsString()
-  district?: string;
+  city?: string;
 
+  // Только верифицированные (status = VERIFIED)
   @IsOptional()
   @IsBooleanString()
   verified?: string;

@@ -1,45 +1,80 @@
 services:
+
+  # ── core_db: основная БД (Users, Orgs, News, Reviews...) ──────────────────
   core_db:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: core_db
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: core_db
       POSTGRES_USER: core_user
       POSTGRES_PASSWORD: core_pass
+      POSTGRES_DB: core_db
     ports:
       - "5434:5432"
+    volumes:
+      - core_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U core_user -d core_db"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 5
 
+  # ── taxi_db: БД такси (Bookings, Slots, Drivers) ──────────────────────────
   taxi_db:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: taxi_db
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: taxi_db
       POSTGRES_USER: taxi_user
       POSTGRES_PASSWORD: taxi_pass
+      POSTGRES_DB: taxi_db
     ports:
       - "5435:5432"
+    volumes:
+      - taxi_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U taxi_user -d taxi_db"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 5
 
+  # ── ai_db: векторная БД для RAG (pgvector) ────────────────────────────────
   ai_db:
     image: pgvector/pgvector:pg16
     container_name: ai_db
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: ai_db
       POSTGRES_USER: ai_user
       POSTGRES_PASSWORD: ai_pass
+      POSTGRES_DB: ai_db
     ports:
       - "5436:5432"
+    volumes:
+      - ai_db_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_db"]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 5
+
+  # ── Redis: кэш и JWT blacklist ─────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: senimdi_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  core_db_data:
+  taxi_db_data:
+  ai_db_data:
+  redis_data:

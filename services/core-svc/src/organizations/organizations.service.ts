@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
 import { OrgStatus } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
 import { ListOrganizationsQuery } from './dto/list-organizations.query';
 
 function toRad(x: number) {
@@ -25,9 +25,15 @@ export class OrganizationsService {
   async list(q: ListOrganizationsQuery) {
     const where: any = {};
 
-    if (q.q) where.name = { contains: q.q, mode: 'insensitive' };
-    if (q.type) where.type = q.type;
-    if (q.district) where.district = q.district;
+    // nameRu (раньше было name — в схеме поле называется nameRu)
+    if (q.q) where.nameRu = { contains: q.q, mode: 'insensitive' };
+
+    // category (раньше было type)
+    if (q.category) where.category = q.category;
+
+    // city (раньше было district)
+    if (q.city) where.city = q.city;
+
     if (q.verified === 'true') where.status = OrgStatus.VERIFIED;
 
     return this.prisma.organization.findMany({
@@ -42,10 +48,54 @@ export class OrganizationsService {
     return this.prisma.organization.findUnique({ where: { id } });
   }
 
+  // ── Сохранить организацию ─────────────────────────────────────────────────
+  async saveOrg(userId: string, orgId: string) {
+    const org = await this.prisma.organization.findUnique({ where: { id: orgId } });
+    if (!org) throw new Error('Организация не найдена');
+
+    await this.prisma.savedOrganization.upsert({
+      where: { userId_organizationId: { userId, organizationId: orgId } },
+      update: {},
+      create: { userId, organizationId: orgId },
+    });
+    return { saved: true, message: 'Организация сохранена' };
+  }
+
+  // ── Убрать из сохранённых ─────────────────────────────────────────────────
+  async unsaveOrg(userId: string, orgId: string) {
+    await this.prisma.savedOrganization.deleteMany({
+      where: { userId, organizationId: orgId },
+    });
+    return { saved: false, message: 'Убрано из сохранённых' };
+  }
+
+  // ── Мои сохранённые организации ───────────────────────────────────────────
+  async getSaved(userId: string, limit = 20, offset = 0) {
+    const [items, total] = await Promise.all([
+      this.prisma.savedOrganization.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: Number(limit),
+        skip: Number(offset),
+        include: {
+          organization: {
+            select: {
+              id: true, nameRu: true, category: true,
+              city: true, address: true, phone: true,
+              ratingAvg: true, ratingCount: true, isAccessible: true,
+            },
+          },
+        },
+      }),
+      this.prisma.savedOrganization.count({ where: { userId } }),
+    ]);
+    return { items: items.map(s => s.organization), total };
+  }
+
   async nearby(params: { lat: number; lon: number; radius: number; verified?: boolean }) {
     const { lat, lon, radius, verified } = params;
 
-    // bbox prefilter (MVP ускорение)
+    // bbox prefilter (MVP — ускорение запроса)
     const latDelta = radius / 111_320;
     const lonDelta = radius / (111_320 * Math.cos(toRad(lat)));
 

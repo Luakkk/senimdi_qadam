@@ -1,19 +1,27 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateComplaintDto {
-  @ApiProperty({ example: 'На карте неправильный адрес / нет пандуса / мошенники и т.д.' })
+  // На кого жалоба: 'organization' | 'user'
+  @ApiProperty({ example: 'organization', description: 'Тип цели: organization | user' })
+  @IsString()
+  @IsIn(['organization', 'user'])
+  targetType!: string;
+
+  // ID организации или пользователя
+  @ApiProperty({ example: 'uuid-организации-или-юзера' })
+  @IsString()
+  targetId!: string;
+
+  // Краткая причина жалобы
+  @ApiProperty({ example: 'Неверный адрес на карте' })
   @IsString()
   @MinLength(3)
-  message!: string;
+  reason!: string;
 
-  @ApiPropertyOptional({ example: 'org_cuid_id' })
+  // Подробное описание (опционально)
+  @ApiPropertyOptional({ example: 'Адрес указан как ул. Абая 10, но реально это ул. Абая 12' })
   @IsOptional()
   @IsString()
-  organizationId?: string;
-
-  @ApiPropertyOptional({ example: '+7700...' })
-  @IsOptional()
-  @IsString()
-  contact?: string;
+  description?: string;
 }

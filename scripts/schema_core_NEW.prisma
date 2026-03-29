@@ -1,0 +1,202 @@
+// ===================================================
+// SenimdiQAdam — core-svc Prisma Schema
+// ===================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  RELATIVE
+  ORG_MANAGER
+  MODERATOR
+  ADMIN
+}
+
+enum DisabilityType {
+  VISUAL
+  HEARING
+  MOBILITY
+  COGNITIVE
+  SPEECH
+  OTHER
+}
+
+enum OrgCategory {
+  REHABILITATION
+  EDUCATION
+  MEDICAL
+  LEGAL
+  SOCIAL
+  SPORT
+  CULTURE
+  EMPLOYMENT
+  OTHER
+}
+
+enum OrgStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ComplaintStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  role         Role     @default(USER)
+  isVerified   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  googleId     String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile          UserProfile?
+  asGuardian       RelativeLink[] @relation("GuardianLinks")
+  asDependent      RelativeLink[] @relation("DependentLinks")
+  managedOrgs      Organization[] @relation("OrgManager")
+  savedOrgs        SavedOrganization[]
+  tickets          Ticket[]
+  complaints       Complaint[]
+  verificationLogs VerificationLog[]
+}
+
+model UserProfile {
+  id             String          @id @default(uuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String
+  phone          String?
+  birthDate      DateTime?
+  city           String?
+  disabilityType DisabilityType?
+  disabilityNote String?
+  avatarUrl      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model RelativeLink {
+  id          String   @id @default(uuid())
+  guardianId  String
+  dependentId String
+  label       String?
+  isAccepted  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  guardian  User @relation("GuardianLinks",  fields: [guardianId],  references: [id])
+  dependent User @relation("DependentLinks", fields: [dependentId], references: [id])
+
+  @@unique([guardianId, dependentId])
+}
+
+model Organization {
+  id           String      @id @default(uuid())
+  nameRu       String
+  nameKk       String?
+  nameEn       String?
+  category     OrgCategory @default(OTHER)
+  status       OrgStatus   @default(PENDING)
+  description  String?
+  address      String?
+  city         String      @default("Алматы")
+  phone        String?
+  email        String?
+  website      String?
+  instagram    String?
+  lat          Float?
+  lon          Float?
+  managerId    String?
+  manager      User?       @relation("OrgManager", fields: [managerId], references: [id])
+  isAccessible Boolean     @default(true)
+  workingHours String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  verificationLogs VerificationLog[]
+  savedBy          SavedOrganization[]
+}
+
+model SavedOrganization {
+  id             String       @id @default(uuid())
+  userId         String
+  organizationId String
+  createdAt      DateTime     @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+}
+
+model VerificationLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  moderatorId    String?
+  moderator      User?        @relation(fields: [moderatorId], references: [id])
+  status         OrgStatus
+  comment        String?
+  createdAt      DateTime     @default(now())
+}
+
+model Ticket {
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  subject    String
+  body       String
+  status     TicketStatus @default(OPEN)
+  assigneeId String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+model Complaint {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  targetType  String
+  targetId    String
+  reason      String
+  description String?
+  status      ComplaintStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Guide {
+  id          String   @id @default(uuid())
+  titleRu     String
+  titleKk     String?
+  bodyRu      String
+  bodyKk      String?
+  category    String?
+  tags        String[]
+  isPublished Boolean  @default(false)
+  authorId    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

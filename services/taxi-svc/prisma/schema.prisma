@@ -1,0 +1,101 @@
+// ===================================================
+// SenimdiQAdam — taxi-svc Prisma Schema
+// ===================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DriverStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum VehicleType {
+  SEDAN
+  MINIVAN
+  WHEELCHAIR_VAN
+  OTHER
+}
+
+model Driver {
+  id           String       @id @default(uuid())
+  userId       String       @unique // id из core-svc User
+  firstName    String
+  lastName     String
+  phone        String       @unique
+  vehicleType  VehicleType  @default(SEDAN)
+  vehicleModel String?
+  licensePlate String       @unique
+  status       DriverStatus @default(INACTIVE)
+  lat          Float?       // текущая позиция
+  lon          Float?
+  rating       Float        @default(0)
+  totalTrips   Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  slots    Slot[]
+  bookings Booking[]
+  reviews  Review[]
+}
+
+model Slot {
+  id        String   @id @default(uuid())
+  driverId  String
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  startTime DateTime
+  endTime   DateTime
+  isBooked  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  booking Booking? // один слот — одно бронирование
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  slotId      String        @unique // anti double-booking
+  slot        Slot          @relation(fields: [slotId], references: [id])
+  driverId    String
+  driver      Driver        @relation(fields: [driverId], references: [id])
+  userId      String        // id из core-svc
+  fromAddress String
+  toAddress   String
+  fromLat     Float?
+  fromLon     Float?
+  toLat       Float?
+  toLon       Float?
+  status      BookingStatus @default(PENDING)
+  note        String?       // особые пожелания (инвалидная коляска и т.д.)
+  price       Float?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  review Review?
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  driverId  String
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  userId    String
+  rating    Int      // 1-5
+  comment   String?
+  createdAt DateTime @default(now())
+}
