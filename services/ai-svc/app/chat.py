@@ -119,7 +119,7 @@ def search_organizations(query: str) -> list[dict]:
                 SELECT "nameRu", category, address, city, phone, website,
                        description, "ratingAvg", "ratingCount"
                 FROM "Organization"
-                WHERE status = 'VERIFIED'
+                WHERE status IN ('VERIFIED', 'PENDING')
                   AND (category = %s OR "nameRu" ILIKE %s OR description ILIKE %s)
                 ORDER BY "ratingAvg" DESC NULLS LAST
                 LIMIT 5
@@ -129,7 +129,7 @@ def search_organizations(query: str) -> list[dict]:
                 SELECT "nameRu", category, address, city, phone, website,
                        description, "ratingAvg", "ratingCount"
                 FROM "Organization"
-                WHERE status = 'VERIFIED'
+                WHERE status IN ('VERIFIED', 'PENDING')
                   AND ("nameRu" ILIKE %s OR description ILIKE %s OR address ILIKE %s)
                 ORDER BY "ratingAvg" DESC NULLS LAST
                 LIMIT 5
@@ -137,11 +137,25 @@ def search_organizations(query: str) -> list[dict]:
 
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+        # Fallback: если ничего не нашли — вернём топ-5 любых организаций
+        if not rows:
+            cur.execute("""
+                SELECT "nameRu", category, address, city, phone, website,
+                       description, "ratingAvg", "ratingCount"
+                FROM "Organization"
+                WHERE status IN ('VERIFIED', 'PENDING')
+                ORDER BY "ratingAvg" DESC NULLS LAST
+                LIMIT 5
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
         conn.close()
         return rows
 
     except Exception as e:
-        print(f"[org search error] {e}")
+        print(f"[org search error] {type(e).__name__}: {e}")
         return []
 
 
