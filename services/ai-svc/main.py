@@ -1,29 +1,26 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
-from app.routers.rag_router import router as rag_router
-from app.routers.speech_router import router as speech_router
+from app.routers.chat_router import router as chat_router
 
 app = FastAPI(
     title="SenimdiQAdam — AI Service",
-    description="RAG-ассистент и Speech STT/TTS для людей с инвалидностью",
-    version="1.0.0",
+    description="AI-ассистент Сенім для людей с инвалидностью в Алматы, Казахстан",
+    version="2.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:5173",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(rag_router)
-app.include_router(speech_router)
-
-@app.on_event("startup")
-async def startup():
-    init_db()
+app.include_router(chat_router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "ai-svc"}
+    return {"status": "ok", "service": "ai-svc", "assistant": "Сенім (Senim)"}
