@@ -2,14 +2,14 @@ import {
   Controller,
   Post,
   Get,
-  Delete,
   Body,
   Param,
+  Patch,
   Query,
   UseGuards,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -22,37 +22,30 @@ export class BookingsController {
   constructor(private bookingsService: BookingsService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Создать бронирование поездки' })
+  @ApiOperation({ summary: 'Создать заявку на поездку' })
   create(@Req() req: any, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(req.user.sub, dto);
   }
 
   @Get('my')
-  @ApiOperation({ summary: 'Мои бронирования' })
+  @ApiOperation({ summary: 'Мои заявки' })
   getMyBookings(@Req() req: any) {
     return this.bookingsService.getMyBookings(req.user.sub);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Отменить бронирование' })
-  cancel(@Req() req: any, @Param('id') id: string) {
-    return this.bookingsService.cancel(req.user.sub, id);
+  @Get(':id')
+  @ApiOperation({ summary: 'Детали заявки (с сообщениями)' })
+  getOne(@Req() req: any, @Param('id') id: string) {
+    return this.bookingsService.getOne(req.user.sub, id);
   }
 
-  @Get('nearby-drivers')
-  @ApiOperation({ summary: 'Найти ближайших водителей (Haversine)' })
-  @ApiQuery({ name: 'lat', type: Number })
-  @ApiQuery({ name: 'lon', type: Number })
-  @ApiQuery({ name: 'radius', type: Number, required: false })
-  findNearby(
-    @Query('lat') lat: string,
-    @Query('lon') lon: string,
-    @Query('radius') radius?: string,
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Отменить заявку' })
+  cancel(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('reason') reason?: string,
   ) {
-    return this.bookingsService.findNearbyDrivers(
-      parseFloat(lat),
-      parseFloat(lon),
-      radius ? parseFloat(radius) : 10,
-    );
+    return this.bookingsService.cancel(req.user.sub, id, reason);
   }
 }

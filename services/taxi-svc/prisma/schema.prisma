@@ -8,8 +8,9 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
+
+// ── Enums ──────────────────────────────────────────────────────────────────
 
 enum DriverStatus {
   ACTIVE
@@ -18,11 +19,11 @@ enum DriverStatus {
 }
 
 enum BookingStatus {
-  PENDING
-  CONFIRMED
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
+  PENDING       // ждёт рассмотрения менеджером
+  CONFIRMED     // менеджер назначил водителя
+  IN_PROGRESS   // поездка идёт
+  COMPLETED     // завершена
+  CANCELLED     // отменена
 }
 
 enum VehicleType {
@@ -32,70 +33,136 @@ enum VehicleType {
   OTHER
 }
 
+enum DisabilityType {
+  WHEELCHAIR    // инвалидная коляска
+  VISUAL        // нарушение зрения
+  HEARING       // нарушение слуха
+  MOBILITY      // нарушение опорно-двигательного аппарата
+  OTHER
+}
+
+enum MessageSender {
+  USER
+  MANAGER
+}
+
+// ── Models ─────────────────────────────────────────────────────────────────
+
+// Менеджеры такси (регистрируются через инвайт-код)
+model TaxiManager {
+  id        String   @id @default(uuid())
+  userId    String   @unique  // ссылка на User в core-svc
+  firstName String
+  lastName  String
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  bookings  Booking[]        // заявки которые вёл этот менеджер
+  messages  BookingMessage[]
+
+  @@index([userId])
+}
+
+// Водители
 model Driver {
   id           String       @id @default(uuid())
-  userId       String       @unique // id из core-svc User
+  userId       String?      @unique  // в будущем — свой аккаунт
   firstName    String
   lastName     String
   phone        String       @unique
-  vehicleType  VehicleType  @default(SEDAN)
+  whatsapp     String?      // номер для WA (может отличаться)
+  vehicleType  VehicleType  @default(WHEELCHAIR_VAN)
   vehicleModel String?
   licensePlate String       @unique
-  status       DriverStatus @default(INACTIVE)
-  lat          Float?       // текущая позиция
-  lon          Float?
-  rating       Float        @default(0)
+  status       DriverStatus @default(ACTIVE)
+  ratingAvg    Float        @default(0)
+  ratingCount  Int          @default(0)
   totalTrips   Int          @default(0)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  slots    Slot[]
   bookings Booking[]
-  reviews  Review[]
+  reviews  DriverReview[]
+
+  @@index([status])
 }
 
-model Slot {
-  id        String   @id @default(uuid())
-  driverId  String
-  driver    Driver   @relation(fields: [driverId], references: [id])
-  startTime DateTime
-  endTime   DateTime
-  isBooked  Boolean  @default(false)
-  createdAt DateTime @default(now())
-
-  booking Booking? // один слот — одно бронирование
-}
-
+// Заявки на поездку
 model Booking {
-  id          String        @id @default(uuid())
-  slotId      String        @unique // anti double-booking
-  slot        Slot          @relation(fields: [slotId], references: [id])
-  driverId    String
-  driver      Driver        @relation(fields: [driverId], references: [id])
-  userId      String        // id из core-svc
-  fromAddress String
-  toAddress   String
-  fromLat     Float?
-  fromLon     Float?
-  toLat       Float?
-  toLon       Float?
-  status      BookingStatus @default(PENDING)
-  note        String?       // особые пожелания (инвалидная коляска и т.д.)
-  price       Float?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             String         @id @default(uuid())
+  userId         String         // id из core-svc
+  managerId      String?        // кто назначил
+  manager        TaxiManager?   @relation(fields: [managerId], references: [id])
+  driverId       String?        // назначается менеджером
+  driver         Driver?        @relation(fields: [driverId], references: [id])
 
-  review Review?
+  // маршрут
+  fromAddress    String
+  toAddress      String
+  fromLat        Float?
+  fromLon        Float?
+  toLat          Float?
+  toLon          Float?
+
+  // детали
+  scheduledAt    DateTime       // желаемое время поездки
+  disabilityType DisabilityType
+  note           String?        // особые пожелания
+  status         BookingStatus  @default(PENDING)
+  cancelReason   String?        // причина отмены
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  messages BookingMessage[]
+  review   DriverReview?
+
+  // сортировка очереди по времени подачи
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([driverId])
 }
 
-model Review {
+// Чат: пользователь ↔ менеджер (в рамках заявки)
+model BookingMessage {
+  id         String        @id @default(uuid())
+  bookingId  String
+  booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  managerId  String?
+  manager    TaxiManager?  @relation(fields: [managerId], references: [id])
+  senderId   String        // userId из core-svc (кто отправил)
+  senderType MessageSender // USER или MANAGER
+  text       String
+  isRead     Boolean       @default(false)
+  createdAt  DateTime      @default(now())
+
+  @@index([bookingId, createdAt])
+}
+
+// Отзывы на водителя (после COMPLETED поездки)
+model DriverReview {
   id        String   @id @default(uuid())
-  bookingId String   @unique
+  bookingId String   @unique  // один отзыв на поездку
   booking   Booking  @relation(fields: [bookingId], references: [id])
   driverId  String
   driver    Driver   @relation(fields: [driverId], references: [id])
-  userId    String
+  userId    String   // из core-svc
   rating    Int      // 1-5
   comment   String?
   createdAt DateTime @default(now())
+
+  @@index([driverId])
+}
+
+// Инвайт-коды для регистрации менеджеров
+model ManagerInvite {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  usedBy    String?  // userId кто использовал
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([code])
 }
