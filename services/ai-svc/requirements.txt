@@ -1,9 +1,26 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-python-dotenv==1.0.1
-psycopg2-binary==2.9.9
-openai==1.54.0
 python-multipart==0.0.12
+
+# ── Config & validation ───────────────────────────────────────────────────────
 pydantic==2.9.2
 pydantic-settings==2.6.0
+python-dotenv==1.0.1
+
+# ── Database ──────────────────────────────────────────────────────────────────
+psycopg2-binary==2.9.9
+
+# ── AI / OpenAI ───────────────────────────────────────────────────────────────
+openai==1.54.0
 httpx==0.27.2
+
+# ── TTS: Microsoft Edge TTS (бесплатно, без API ключей) ──────────────────────
+# Голоса: ru-RU-SvetlanaNeural, kk-KZ-AigulNeural
+# https://github.com/rany2/edge-tts
+edge-tts==6.1.12
+
+# ── STT: OpenAI Whisper (локально, бесплатно, CPU) ───────────────────────────
+# Модель: small (~150MB), язык: ru / kk
+# https://github.com/SYSTRAN/faster-whisper
+faster-whisper==1.0.3
