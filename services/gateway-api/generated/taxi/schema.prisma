@@ -1,0 +1,118 @@
+// gateway-api — копия taxi_db схемы для AdminJS
+// Prisma генерирует клиент в generated/taxi
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/taxi"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("TAXI_DB_URL")
+}
+
+enum DriverStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum VehicleType {
+  SEDAN
+  MINIVAN
+  WHEELCHAIR_VAN
+  OTHER
+}
+
+enum DisabilityType {
+  WHEELCHAIR
+  VISUAL
+  HEARING
+  MOBILITY
+  OTHER
+}
+
+enum MessageSender {
+  USER
+  MANAGER
+}
+
+model TaxiManager {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  firstName String
+  lastName  String
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  bookings Booking[]
+}
+
+model Driver {
+  id           String       @id @default(uuid())
+  firstName    String
+  lastName     String
+  phone        String       @unique
+  vehicleType  VehicleType  @default(WHEELCHAIR_VAN)
+  vehicleModel String?
+  licensePlate String       @unique
+  status       DriverStatus @default(ACTIVE)
+  ratingAvg    Float        @default(0)
+  ratingCount  Int          @default(0)
+  totalTrips   Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  bookings Booking[]
+  reviews  DriverReview[]
+}
+
+model Booking {
+  id             String         @id @default(uuid())
+  userId         String
+  managerId      String?
+  manager        TaxiManager?   @relation(fields: [managerId], references: [id])
+  driverId       String?
+  driver         Driver?        @relation(fields: [driverId], references: [id])
+  fromAddress    String
+  toAddress      String
+  scheduledAt    DateTime
+  disabilityType DisabilityType
+  note           String?
+  status         BookingStatus  @default(PENDING)
+  cancelReason   String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  review DriverReview?
+}
+
+model DriverReview {
+  id        String   @id @default(uuid())
+  bookingId String   @unique
+  booking   Booking  @relation(fields: [bookingId], references: [id])
+  driverId  String
+  driver    Driver   @relation(fields: [driverId], references: [id])
+  userId    String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+}
+
+model ManagerInvite {
+  id        String    @id @default(uuid())
+  code      String    @unique
+  usedBy    String?
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+}

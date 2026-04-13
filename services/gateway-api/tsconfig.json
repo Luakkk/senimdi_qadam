@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
     "target": "ES2021",
     "sourceMap": true,
     "outDir": "./dist",
@@ -14,5 +16,13 @@
     "skipLibCheck": true,
     "strictNullChecks": false,
     "noImplicitAny": false
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "prisma/**/*.ts",
+    "prisma/**/*.config.ts",
+    "generated/core/index.d 2.ts",
+    "generated/taxi/index.d 2.ts"
+  ]
 }

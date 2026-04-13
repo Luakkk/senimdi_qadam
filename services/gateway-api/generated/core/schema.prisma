@@ -1,0 +1,183 @@
+// gateway-api — копия core_db схемы для AdminJS
+// Prisma генерирует клиент в generated/core
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../generated/core"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("CORE_DB_URL")
+}
+
+enum Role {
+  USER
+  RELATIVE
+  ORG_MANAGER
+  TAXI_MANAGER
+  MODERATOR
+  ADMIN
+}
+
+enum DisabilityType {
+  VISUAL
+  HEARING
+  MOBILITY
+  COGNITIVE
+  SPEECH
+  OTHER
+}
+
+enum OrgCategory {
+  REHABILITATION
+  EDUCATION
+  MEDICAL
+  LEGAL
+  SOCIAL
+  SPORT
+  CULTURE
+  EMPLOYMENT
+  OTHER
+}
+
+enum OrgStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  SUSPENDED
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ComplaintStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
+enum NewsStatus {
+  DRAFT
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+enum NewsCommentStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?
+  role         Role     @default(USER)
+  isVerified   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  googleId     String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile    UserProfile?
+  tickets    Ticket[]
+  complaints Complaint[]
+  news       News[]
+}
+
+model UserProfile {
+  id             String          @id @default(uuid())
+  userId         String          @unique
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName      String
+  lastName       String
+  phone          String?
+  city           String?
+  disabilityType DisabilityType?
+  avatarUrl      String?
+  lat            Float?
+  lon            Float?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Organization {
+  id           String      @id @default(uuid())
+  nameRu       String
+  nameKk       String?
+  category     OrgCategory @default(OTHER)
+  status       OrgStatus   @default(PENDING)
+  description  String?
+  address      String?
+  city         String      @default("Алматы")
+  phone        String?
+  email        String?
+  website      String?
+  lat          Float?
+  lon          Float?
+  isAccessible Boolean     @default(true)
+  ratingAvg    Float?
+  ratingCount  Int         @default(0)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model Ticket {
+  id        String       @id @default(uuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  subject   String
+  body      String
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Complaint {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  targetType  String
+  targetId    String
+  reason      String
+  description String?
+  status      ComplaintStatus @default(OPEN)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model News {
+  id            String     @id @default(uuid())
+  authorId      String
+  author        User       @relation(fields: [authorId], references: [id])
+  titleRu       String
+  bodyRu        String
+  imageUrl      String?
+  status        NewsStatus @default(PENDING)
+  rejectReason  String?
+  likesCount    Int        @default(0)
+  commentsCount Int        @default(0)
+  publishedAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  comments NewsComment[]
+}
+
+model NewsComment {
+  id        String            @id @default(uuid())
+  newsId    String
+  news      News              @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  authorId  String
+  text      String
+  status    NewsCommentStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+}

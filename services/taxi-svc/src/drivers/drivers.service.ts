@@ -29,8 +29,6 @@ export class DriversService {
         status: true,
         ratingAvg: true,
         ratingCount: true,
-        lat: true,
-        lon: true,
       },
       orderBy: { ratingAvg: 'desc' },
     });
@@ -121,7 +119,7 @@ export class DriversService {
       where: { id: booking.driverId },
       data: {
         ratingAvg: _avg.rating ?? 0,
-        ratingCount: _count.rating,
+        ratingCount: (_count as { rating: number }).rating,
       },
     });
 

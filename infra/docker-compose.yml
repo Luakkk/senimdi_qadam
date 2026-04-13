@@ -1,6 +1,9 @@
 services:
 
-  # ── core_db: основная БД (Users, Orgs, News, Reviews...) ──────────────────
+  # ═══════════════════════════════════════════════════════════════════════════
+  # БАЗЫ ДАННЫХ
+  # ═══════════════════════════════════════════════════════════════════════════
+
   core_db:
     image: postgres:16-alpine
     container_name: core_db
@@ -19,7 +22,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── taxi_db: БД такси (Bookings, Slots, Drivers) ──────────────────────────
   taxi_db:
     image: postgres:16-alpine
     container_name: taxi_db
@@ -38,7 +40,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── ai_db: векторная БД для RAG (pgvector) ────────────────────────────────
   ai_db:
     image: pgvector/pgvector:pg16
     container_name: ai_db
@@ -57,7 +58,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Redis: кэш и JWT blacklist ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: senimdi_redis
@@ -72,6 +72,95 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # СЕРВИСЫ
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  core-svc:
+    build:
+      context: ../services/core-svc
+      dockerfile: Dockerfile
+    container_name: core_svc
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://core_user:core_pass@core_db:5432/core_db
+      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
+      JWT_REFRESH_SECRET: senimdi-qadam-refresh-secret-2026
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3001
+    depends_on:
+      core_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  taxi-svc:
+    build:
+      context: ../services/taxi-svc
+      dockerfile: Dockerfile
+    container_name: taxi_svc
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      DATABASE_URL: postgresql://taxi_user:taxi_pass@taxi_db:5432/taxi_db
+      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PORT: 3002
+    depends_on:
+      taxi_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  gateway-api:
+    build:
+      context: ../services/gateway-api
+      dockerfile: Dockerfile
+    container_name: gateway_api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
+      CORE_SVC_URL: http://core-svc:3001
+      TAXI_SVC_URL: http://taxi-svc:3002
+      AI_SVC_URL: http://ai-svc:8000
+      CORE_DB_URL: postgresql://core_user:core_pass@core_db:5432/core_db
+      TAXI_DB_URL: postgresql://taxi_user:taxi_pass@taxi_db:5432/taxi_db
+      ADMIN_COOKIE_SECRET: senimdi-qadam-admin-cookie-2026
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      core_db:
+        condition: service_healthy
+      taxi_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ai-svc:
+    build:
+      context: ../services/ai-svc
+      dockerfile: Dockerfile
+    container_name: ai_svc
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://ai_user:ai_pass@ai_db:5432/ai_db
+      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
+    depends_on:
+      ai_db:
+        condition: service_healthy
 
 volumes:
   core_db_data:
