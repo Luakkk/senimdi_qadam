@@ -143,8 +143,14 @@ export class NewsController {
       }),
       limits: { fileSize: 5 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
-        const allowed = /\.(jpg|jpeg|png|webp)$/i;
-        cb(null, allowed.test(file.originalname));
+        // Проверяем и MIME-тип (из Content-Type) И расширение файла.
+        // Только расширение — небезопасно: можно загрузить evil.php.jpg
+        const allowedMime = /^image\/(jpeg|png|webp)$/;
+        const allowedExt  = /\.(jpg|jpeg|png|webp)$/i;
+        if (!allowedMime.test(file.mimetype) || !allowedExt.test(file.originalname)) {
+          return cb(new Error('Только JPG, PNG или WebP'), false);
+        }
+        cb(null, true);
       },
     }),
   )

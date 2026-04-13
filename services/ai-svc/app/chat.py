@@ -1,5 +1,5 @@
 import math
-import psycopg2
+import httpx
 from openai import AzureOpenAI
 from typing import Optional
 from .config import settings
@@ -139,11 +139,12 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 # ── Поиск организаций в core_db ───────────────────────────────────────────────
 
 def search_organizations(query: str, lat: Optional[float] = None, lon: Optional[float] = None) -> list[dict]:
-    """Ищем организации в core_db. Если передана геолокация — добавляем расстояние."""
+    """
+    Ищем организации через API core-svc (GET /organizations/search).
+    Архитектурно правильно: ai-svc НЕ обращается к БД core-svc напрямую,
+    а использует публичный HTTP-эндпоинт.
+    """
     try:
-        conn = psycopg2.connect(settings.CORE_DATABASE_URL)
-        cur = conn.cursor()
-
         # Маппинг ключевых слов → категории Prisma enum
         category_map = {
             "реабилит":       "REHABILITATION",
@@ -169,39 +170,18 @@ def search_organizations(query: str, lat: Optional[float] = None, lon: Optional[
                 category_filter = cat
                 break
 
-        # Базовый SELECT — берём lat/lon чтобы считать расстояние
-        select = """
-            SELECT "nameRu", category, address, city, phone, website,
-                   description, "ratingAvg", "ratingCount", lat, lon
-            FROM "Organization"
-            WHERE status IN ('VERIFIED', 'PENDING')
-        """
-
+        # Вызываем HTTP API core-svc
+        params: dict = {"query": query, "limit": 10}
         if category_filter:
-            cur.execute(
-                select + """ AND (category = %s OR "nameRu" ILIKE %s OR description ILIKE %s)
-                ORDER BY "ratingAvg" DESC NULLS LAST LIMIT 10""",
-                (category_filter, f"%{query}%", f"%{query}%"),
-            )
-        else:
-            cur.execute(
-                select + """ AND ("nameRu" ILIKE %s OR description ILIKE %s OR address ILIKE %s)
-                ORDER BY "ratingAvg" DESC NULLS LAST LIMIT 10""",
-                (f"%{query}%", f"%{query}%", f"%{query}%"),
-            )
+            params["category"] = category_filter
 
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-
-        # Fallback: вернём топ-5 если ничего не нашли
-        if not rows:
-            cur.execute(
-                select + " ORDER BY \"ratingAvg\" DESC NULLS LAST LIMIT 5"
-            )
-            cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-
-        conn.close()
+        resp = httpx.get(
+            f"{settings.CORE_SVC_URL}/organizations/search",
+            params=params,
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        rows: list[dict] = resp.json()
 
         # Добавляем расстояние если есть геолокация
         if lat is not None and lon is not None:
@@ -209,9 +189,8 @@ def search_organizations(query: str, lat: Optional[float] = None, lon: Optional[
                 if org.get("lat") and org.get("lon"):
                     dist_km = _haversine_km(lat, lon, org["lat"], org["lon"])
                     org["distanceKm"] = round(dist_km, 1)
-            # Сортируем по расстоянию если есть координаты
-            rows_with_dist  = [o for o in rows if "distanceKm" in o]
-            rows_without    = [o for o in rows if "distanceKm" not in o]
+            rows_with_dist = [o for o in rows if "distanceKm" in o]
+            rows_without   = [o for o in rows if "distanceKm" not in o]
             rows = sorted(rows_with_dist, key=lambda x: x["distanceKm"]) + rows_without
 
         return rows

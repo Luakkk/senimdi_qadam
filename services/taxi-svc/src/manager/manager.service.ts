@@ -59,40 +59,59 @@ export class ManagerService {
   }
 
   // ─── Назначить водителя → статус CONFIRMED ────────────────────────────────
+  // Используем транзакцию + условный UPDATE для защиты от гонки условий:
+  // если два менеджера одновременно пытаются назначить водителя на одну заявку,
+  // updateMany вернёт count=0 для второго — он получит ошибку.
   async assignDriver(managerId: string, bookingId: string, dto: AssignDriverDto) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
-    if (!booking) throw new NotFoundException('Заявка не найдена');
-    if (booking.status !== BookingStatus.PENDING) {
-      throw new BadRequestException('Можно назначить водителя только к PENDING заявке');
-    }
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Проверяем наличие заявки и водителя (внутри транзакции)
+      const booking = await tx.booking.findUnique({ where: { id: bookingId } });
+      if (!booking) throw new NotFoundException('Заявка не найдена');
+      if (booking.status !== BookingStatus.PENDING) {
+        throw new BadRequestException('Можно назначить водителя только к PENDING заявке');
+      }
 
-    const driver = await this.prisma.driver.findUnique({ where: { id: dto.driverId } });
-    if (!driver) throw new NotFoundException('Водитель не найден');
-    if (driver.status !== 'ACTIVE') {
-      throw new BadRequestException('Водитель недоступен');
-    }
+      const driver = await tx.driver.findUnique({ where: { id: dto.driverId } });
+      if (!driver) throw new NotFoundException('Водитель не найден');
+      if (driver.status !== 'ACTIVE') {
+        throw new BadRequestException('Водитель недоступен');
+      }
 
-    return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: {
-        driverId: dto.driverId,
-        managerId,
-        status: BookingStatus.CONFIRMED,
-      },
-      include: {
-        driver: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
-            whatsapp: true,
-            vehicleType: true,
-            vehicleModel: true,
-            licensePlate: true,
+      // 2. Атомарное обновление — WHERE включает status: PENDING.
+      // Если другой менеджер уже успел изменить статус, count будет 0.
+      const result = await tx.booking.updateMany({
+        where: { id: bookingId, status: BookingStatus.PENDING },
+        data: {
+          driverId: dto.driverId,
+          managerId,
+          status: BookingStatus.CONFIRMED,
+        },
+      });
+
+      if (result.count === 0) {
+        throw new BadRequestException(
+          'Заявка уже была назначена другим менеджером — обновите очередь',
+        );
+      }
+
+      // 3. Возвращаем обновлённую заявку с деталями водителя
+      return tx.booking.findUnique({
+        where: { id: bookingId },
+        include: {
+          driver: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phone: true,
+              whatsapp: true,
+              vehicleType: true,
+              vehicleModel: true,
+              licensePlate: true,
+            },
           },
         },
-      },
+      });
     });
   }
 

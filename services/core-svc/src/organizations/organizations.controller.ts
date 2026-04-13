@@ -37,6 +37,24 @@ export class OrganizationsController {
     });
   }
 
+  // ── Поиск для AI-ассистента (ai-svc вызывает этот endpoint, а не DB напрямую)
+  @Get('search')
+  @ApiOperation({ summary: 'Полнотекстовый поиск организаций (для AI-сервиса)' })
+  @ApiQuery({ name: 'query',    required: true,  description: 'Поисковый запрос' })
+  @ApiQuery({ name: 'category', required: false, description: 'Категория (OrgCategory enum)' })
+  @ApiQuery({ name: 'limit',    required: false, description: 'Лимит результатов (по умолчанию 10)' })
+  search(
+    @Query('query')    query:     string,
+    @Query('category') category?: string,
+    @Query('limit')    limit?:    string,
+  ) {
+    return this.orgs.search({
+      query:    query ?? '',
+      category: category,
+      limit:    limit ? parseInt(limit, 10) : 10,
+    });
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Карточка организации' })
   async get(@Param('id') id: string) {

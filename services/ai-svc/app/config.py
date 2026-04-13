@@ -3,8 +3,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ai_db
     DATABASE_URL: str = "postgresql://ai_user:ai_pass@localhost:5436/ai_db"
-    # core_db (для поиска организаций)
-    CORE_DATABASE_URL: str = "postgresql://core_user:core_pass@localhost:5434/core_db"
+
+    # URL core-svc API (ai-svc использует HTTP-эндпоинт вместо прямого SQL)
+    CORE_SVC_URL: str = "http://localhost:3001"
 
     PORT: int = 8000
 

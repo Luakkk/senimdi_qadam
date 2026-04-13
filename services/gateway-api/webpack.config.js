@@ -70,6 +70,14 @@ module.exports = function (options) {
   return {
     ...options,
 
+    // __dirname: true — webpack заменяет __dirname на реальный путь исходного файла.
+    // Без этого adminjs получает dist/ вместо node_modules/adminjs/lib/backend/utils/router/
+    // и ищет свои бандлы по неверному пути (services/frontend/assets/scripts/).
+    node: {
+      ...(options.node || {}),
+      __dirname: true,
+    },
+
     externals: [
       nodeExternals({
         allowlist: [

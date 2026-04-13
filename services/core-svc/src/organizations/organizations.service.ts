@@ -48,6 +48,65 @@ export class OrganizationsService {
     return this.prisma.organization.findUnique({ where: { id } });
   }
 
+  // ── Полнотекстовый поиск для AI-ассистента ───────────────────────────────
+  // Ищем по nameRu, description и address. Возвращаем lat/lon для расстояния.
+  // Этот endpoint вызывает ai-svc через HTTP — НЕ напрямую к БД.
+  async search(params: { query: string; category?: string; limit?: number }) {
+    const { query, category, limit = 10 } = params;
+
+    const textConditions: any[] = [
+      { nameRu:       { contains: query, mode: 'insensitive' } },
+      { description:  { contains: query, mode: 'insensitive' } },
+      { address:      { contains: query, mode: 'insensitive' } },
+    ];
+
+    const where: any = {
+      status: { in: ['VERIFIED', 'PENDING'] },
+    };
+
+    if (category) {
+      // При указании категории: совпадение по категории ИЛИ по тексту
+      where.OR = [{ category }, ...textConditions];
+    } else {
+      where.OR = textConditions;
+    }
+
+    const orgs = await this.prisma.organization.findMany({
+      where,
+      select: {
+        nameRu:       true,
+        category:     true,
+        address:      true,
+        city:         true,
+        phone:        true,
+        website:      true,
+        description:  true,
+        ratingAvg:    true,
+        ratingCount:  true,
+        lat:          true,
+        lon:          true,
+      },
+      orderBy: { ratingAvg: 'desc' },
+      take: limit,
+    });
+
+    // Fallback: если ничего не нашли — вернём топ-5 по рейтингу
+    if (orgs.length === 0) {
+      return this.prisma.organization.findMany({
+        where: { status: { in: ['VERIFIED', 'PENDING'] } },
+        select: {
+          nameRu: true, category: true, address: true, city: true,
+          phone: true, website: true, description: true,
+          ratingAvg: true, ratingCount: true, lat: true, lon: true,
+        },
+        orderBy: { ratingAvg: 'desc' },
+        take: 5,
+      });
+    }
+
+    return orgs;
+  }
+
   // ── Сохранить организацию ─────────────────────────────────────────────────
   async saveOrg(userId: string, orgId: string) {
     const org = await this.prisma.organization.findUnique({ where: { id: orgId } });
