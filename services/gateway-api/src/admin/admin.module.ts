@@ -368,29 +368,37 @@ export class AdminModule {
           }, // end adminJsOptions
 
           // ── Авторизация через core-svc ─────────────────────────────────────
-          // Логинимся на /admin/login, проверяем роль через POST /auth/login
+          // Логинимся на /admin/login, проверяем роль через POST /auth/login,
+          // затем верифицируем токен через GET /auth/me (core-svc проверяет подпись + isActive)
           auth: {
             cookieName:     'adminjs_senimdi',
-            cookiePassword: process.env.ADMIN_COOKIE_SECRET || 'senimdi-qadam-admin-2026',
+            cookiePassword: process.env.ADMIN_COOKIE_SECRET || '',
             authenticate: async (email: string, password: string) => {
               try {
                 const coreSvcUrl = process.env.CORE_SVC_URL || 'http://localhost:3001';
-                const resp = await axios.post(`${coreSvcUrl}/auth/login`, { email, password });
-                const { accessToken } = resp.data;
 
-                // Читаем payload из JWT (без crypto-верификации — доверяем core-svc)
-                const payload = JSON.parse(
-                  Buffer.from(accessToken.split('.')[1], 'base64').toString('utf8'),
-                );
+                // Шаг 1: логин — получаем access token
+                // ⚠️  core-svc использует app.setGlobalPrefix('api'), поэтому все
+                //     эндпоинты доступны по /api/* а не /* напрямую.
+                const loginResp = await axios.post(`${coreSvcUrl}/api/auth/login`, { email, password });
+                const { accessToken } = loginResp.data;
+
+                // Шаг 2: верифицируем токен через /api/auth/me.
+                // core-svc проверяет JWT-подпись через PassportJS + проверяет isActive в БД.
+                // Это защищает от подделки роли через сформированный вручную JWT.
+                const meResp = await axios.get(`${coreSvcUrl}/api/auth/me`, {
+                  headers: { Authorization: `Bearer ${accessToken}` },
+                });
+                const user = meResp.data;
 
                 // Пускаем только ADMIN и MODERATOR
-                if (payload.role !== 'ADMIN' && payload.role !== 'MODERATOR') {
+                if (user.role !== 'ADMIN' && user.role !== 'MODERATOR') {
                   return null;
                 }
 
-                return { email, role: payload.role, id: payload.sub };
+                return { email: user.email, role: user.role, id: user.id };
               } catch {
-                return null; // неверный email/пароль или нет прав
+                return null; // неверный email/пароль, нет прав или сервис недоступен
               }
             },
           },

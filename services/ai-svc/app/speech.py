@@ -8,9 +8,12 @@ STT: faster-whisper (локальная модель OpenAI Whisper, беспл�
 TTS: edge-tts (Microsoft Edge TTS, бесплатно, без API ключа)
      Голоса: ru-RU-SvetlanaNeural, kk-KZ-AigulNeural
      Документация: https://github.com/rany2/edge-tts
+
+ВАЖНО: synthesize_text — async функция.
+asyncio.run() нельзя использовать внутри FastAPI (уже есть активный event loop).
+Используй `await synthesize_text(...)` из async-эндпоинтов.
 """
 
-import asyncio
 import os
 import tempfile
 from functools import lru_cache
@@ -96,10 +99,13 @@ def transcribe_audio(audio_bytes: bytes, language: str = "ru-RU") -> str:
 
 # ── TTS: текст → MP3 ─────────────────────────────────────────────────────────
 
-def synthesize_text(text: str, language: str = "ru-RU") -> bytes:
+async def synthesize_text(text: str, language: str = "ru-RU") -> bytes:
     """
     Преобразует текст в аудио MP3 с помощью edge-tts (Microsoft Edge TTS).
     Бесплатно, без API ключей, работает через интернет.
+
+    ВАЖНО: функция async — вызывай через `await synthesize_text(...)`.
+    asyncio.run() нельзя использовать внутри FastAPI (конфликт event loop).
 
     Args:
         text:     текст для озвучивания
@@ -110,17 +116,12 @@ def synthesize_text(text: str, language: str = "ru-RU") -> bytes:
     """
     voice = VOICE_MAP.get(language, DEFAULT_VOICE)
 
-    async def _synthesize() -> bytes:
+    try:
         communicate = edge_tts.Communicate(text=text, voice=voice)
         audio = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio += chunk["data"]
-        return audio
-
-    try:
-        # Запускаем async функцию синхронно
-        audio = asyncio.run(_synthesize())
         print(f"[speech/tts] voice={voice}, chars={len(text)}, bytes={len(audio)}")
         return audio
     except Exception as e:

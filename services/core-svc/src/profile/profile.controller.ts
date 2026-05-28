@@ -10,10 +10,12 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -21,15 +23,20 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
+import { MinioService } from '../minio/minio.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { RequestLinkDto } from './dto/request-link.dto';
 import { UpdateLocationDto } from './dto/update-location.dto';
+import { RegisterDeviceDto } from './dto/register-device.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Profile')
 @Controller('profile')
 export class ProfileController {
-  constructor(private readonly profileService: ProfileService) {}
+  constructor(
+    private readonly profileService: ProfileService,
+    private readonly minio: MinioService,
+  ) {}
 
   // ═══ ПРИВАТНЫЕ (только свой профиль) ════════════════════════════════════
 
@@ -53,16 +60,10 @@ export class ProfileController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Загрузить аватар (jpg/png, max 5MB)' })
+  @ApiOperation({ summary: 'Загрузить аватар (jpg/png/webp, max 5MB) — хранится в MinIO' })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads/avatars',
-        filename: (_req, file, cb) => {
-          const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          cb(null, unique + extname(file.originalname));
-        },
-      }),
+      storage: memoryStorage(), // файл хранится в RAM — затем загружаем в MinIO
       limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
@@ -72,8 +73,15 @@ export class ProfileController {
       },
     }),
   )
-  uploadAvatar(@Request() req: any, @UploadedFile() file: Express.Multer.File) {
-    return this.profileService.updateAvatar(req.user.sub, file.filename);
+  async uploadAvatar(@Request() req: any, @UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    const url = await this.minio.upload(
+      MinioService.BUCKET_AVATARS,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return this.profileService.updateAvatar(req.user.sub, url);
   }
 
   @Patch('me/location')
@@ -92,6 +100,25 @@ export class ProfileController {
     return this.profileService.deactivate(req.user.sub);
   }
 
+  // ═══ ACCESSIBILITY PREFERENCES ═══════════════════════════════════════════
+
+  @Get('me/accessibility')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Получить настройки доступности' })
+  getAccessibility(@Request() req: any) {
+    return this.profileService.getAccessibilityPrefs(req.user.sub);
+  }
+
+  @Patch('me/accessibility')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Обновить настройки доступности (fontSize, contrast, tts, etc.)' })
+  @HttpCode(HttpStatus.OK)
+  updateAccessibility(@Request() req: any, @Body() prefs: Record<string, any>) {
+    return this.profileService.updateAccessibilityPrefs(req.user.sub, prefs);
+  }
+
   // ═══ МОИ ЛАЙКИ ═══════════════════════════════════════════════════════════
 
   @Get('me/liked-news')
@@ -108,6 +135,24 @@ export class ProfileController {
   @ApiOperation({ summary: 'Гайды которые я лайкнул' })
   getLikedGuides(@Request() req: any) {
     return this.profileService.getLikedGuides(req.user.sub);
+  }
+
+  // ═══ FCM DEVICE TOKEN ════════════════════════════════════════════════════
+
+  @Post('me/device-token')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Зарегистрировать FCM токен для push-уведомлений' })
+  registerDevice(@Request() req: any, @Body() dto: RegisterDeviceDto) {
+    return this.profileService.registerDevice(req.user.sub, dto.token, dto.platform);
+  }
+
+  @Delete('me/device-token')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Удалить FCM токен (при выходе из приложения)' })
+  unregisterDevice(@Request() req: any, @Body() dto: RegisterDeviceDto) {
+    return this.profileService.unregisterDevice(req.user.sub, dto.token);
   }
 
   // ═══ МОИ СОХРАНЁННЫЕ ОРГАНИЗАЦИИ ════════════════════════════════════════

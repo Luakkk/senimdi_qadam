@@ -1,4 +1,15 @@
 import 'dotenv/config';
+
+// ── Sentry must be initialized before any other imports ───────────────────────
+import * as Sentry from '@sentry/node';
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV ?? 'development',
+    tracesSampleRate: 0.2,  // sample 20% of transactions in production
+  });
+}
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -11,10 +22,15 @@ async function bootstrap() {
   // ── Security headers (highload: защита от XSS, clickjacking и т.д.)
   app.use(helmet());
 
-  // ── CORS (разрешаем запросы с фронтенда)
+  // ── CORS (origin берётся из env, не захардкожен — иначе prod не работает)
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:3000')
+    .split(',')
+    .map(o => o.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://localhost:5173'],
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-key'],
   });
 

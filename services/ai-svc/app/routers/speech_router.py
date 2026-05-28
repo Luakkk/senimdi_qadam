@@ -6,12 +6,14 @@ POST /speech/synthesize  — текст → MP3  (edge-tts, Microsoft Edge, бе
 GET  /speech/voices      — список доступных голосов
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, Depends, Request, UploadFile, File, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional
 
 from ..speech import transcribe_audio, synthesize_text, get_available_voices
+from ..auth import require_any_user
+from ..limiter import limiter
 
 router = APIRouter(prefix="/speech", tags=["Speech — STT / TTS"])
 
@@ -38,7 +40,7 @@ class TranscribeResponse(BaseModel):
 @router.post(
     "/transcribe",
     response_model=TranscribeResponse,
-    summary="STT: аудио → текст",
+    summary="STT: аудио → текст (лимит 10 req/min)",
     description="""
 Распознаёт речь из аудиофайла с помощью **faster-whisper** (локальная модель OpenAI Whisper).
 
@@ -47,13 +49,16 @@ class TranscribeResponse(BaseModel):
 **Движок:** faster-whisper small (150MB, CPU, бесплатно)
     """,
 )
+@limiter.limit("10/minute")
 async def transcribe(
+    request: Request,
     file: UploadFile = File(..., description="Аудиофайл (WAV, MP3, OGG, WEBM, M4A)"),
     language: str = Query(
         default="ru-RU",
         description="Язык распознавания: 'ru-RU' или 'kk-KZ'",
         example="ru-RU",
     ),
+    _user: dict = Depends(require_any_user),
 ):
     # Проверяем размер файла (max 25MB)
     audio_bytes = await file.read()
@@ -73,7 +78,7 @@ async def transcribe(
 @router.post(
     "/synthesize",
     response_class=Response,
-    summary="TTS: текст → MP3",
+    summary="TTS: текст → MP3 (лимит 20 req/min)",
     description="""
 Синтезирует речь из текста с помощью **edge-tts** (Microsoft Edge TTS).
 
@@ -91,9 +96,11 @@ async def transcribe(
         }
     },
 )
-async def synthesize(body: SynthesizeRequest):
+@limiter.limit("20/minute")
+async def synthesize(request: Request, body: SynthesizeRequest, _user: dict = Depends(require_any_user)):
     try:
-        audio_bytes = synthesize_text(body.text, language=body.language)
+        # synthesize_text — async функция (asyncio.run() удалён — конфликт event loop)
+        audio_bytes = await synthesize_text(body.text, language=body.language)
         return Response(
             content=audio_bytes,
             media_type="audio/mpeg",

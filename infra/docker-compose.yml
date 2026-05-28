@@ -9,51 +9,61 @@ services:
     container_name: core_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: core_user
-      POSTGRES_PASSWORD: core_pass
-      POSTGRES_DB: core_db
+      POSTGRES_USER:     ${CORE_DB_USER}
+      POSTGRES_PASSWORD: ${CORE_DB_PASSWORD}
+      POSTGRES_DB:       ${CORE_DB_NAME}
     ports:
       - "5434:5432"
     volumes:
       - core_db_data:/var/lib/postgresql/data
+    networks:
+      - core_db_net   # только core-svc видит эту БД
+      - admin         # gateway-api видит для AdminJS
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U core_user -d core_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${CORE_DB_USER} -d ${CORE_DB_NAME}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
   taxi_db:
     image: postgres:16-alpine
     container_name: taxi_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: taxi_user
-      POSTGRES_PASSWORD: taxi_pass
-      POSTGRES_DB: taxi_db
+      POSTGRES_USER:     ${TAXI_DB_USER}
+      POSTGRES_PASSWORD: ${TAXI_DB_PASSWORD}
+      POSTGRES_DB:       ${TAXI_DB_NAME}
     ports:
       - "5435:5432"
     volumes:
       - taxi_db_data:/var/lib/postgresql/data
+    networks:
+      - taxi_db_net   # только taxi-svc видит эту БД
+      - admin         # gateway-api видит для AdminJS
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U taxi_user -d taxi_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${TAXI_DB_USER} -d ${TAXI_DB_NAME}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
   ai_db:
     image: pgvector/pgvector:pg16
     container_name: ai_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ai_user
-      POSTGRES_PASSWORD: ai_pass
-      POSTGRES_DB: ai_db
+      POSTGRES_USER:     ${AI_DB_USER}
+      POSTGRES_PASSWORD: ${AI_DB_PASSWORD}
+      POSTGRES_DB:       ${AI_DB_NAME}
     ports:
       - "5436:5432"
     volumes:
       - ai_db_data:/var/lib/postgresql/data
+    networks:
+      - ai_db_net     # только ai-svc видит эту БД; gateway-api не имеет доступа
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${AI_DB_USER} -d ${AI_DB_NAME}"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -66,11 +76,36 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    networks:
+      - backend
+    # requirepass — защита от несанкционированного доступа внутри Docker сети
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Передаём пароль в healthcheck иначе ping не пройдёт
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: senimdi_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web Console (http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER:     ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
       retries: 5
 
   # ═══════════════════════════════════════════════════════════════════════════
@@ -84,20 +119,54 @@ services:
     container_name: core_svc
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "${CORE_PORT:-3001}:3001"
     environment:
-      DATABASE_URL: postgresql://core_user:core_pass@core_db:5432/core_db
-      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
-      JWT_REFRESH_SECRET: senimdi-qadam-refresh-secret-2026
-      JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_EXPIRES_IN: 7d
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      PORT: 3001
+      DATABASE_URL:           postgresql://${CORE_DB_USER}:${CORE_DB_PASSWORD}@core_db:5432/${CORE_DB_NAME}?connection_limit=10&pool_timeout=30
+      ALLOWED_ORIGINS:        ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      JWT_SECRET:             ${JWT_SECRET}
+      JWT_REFRESH_SECRET:     ${JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN:         ${JWT_EXPIRES_IN:-15m}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      REDIS_HOST:             redis
+      REDIS_PORT:             6379
+      REDIS_PASSWORD:         ${REDIS_PASSWORD}
+      PORT:                   3001
+      GOOGLE_CLIENT_ID:       ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET:   ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL:    ${GOOGLE_CALLBACK_URL}
+      RESEND_API_KEY:         ${RESEND_API_KEY}
+      EMAIL_FROM:             ${EMAIL_FROM:-noreply@senimdi-qadam.kz}
+      FRONTEND_URL:           ${FRONTEND_URL:-http://localhost:5173}
+      ADMIN_KEY:              ${ADMIN_KEY}
+      MINIO_ENDPOINT:         minio
+      MINIO_PORT:             9000
+      MINIO_USE_SSL:          "false"
+      MINIO_ACCESS_KEY:       ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY:       ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_PUBLIC_URL:       ${MINIO_PUBLIC_URL:-http://localhost:9000}
+      # ── Sentry ──────────────────────────────────────────────────────────────
+      SENTRY_DSN:             ${SENTRY_DSN:-}
+      NODE_ENV:               ${NODE_ENV:-production}
+      # ── Firebase / FCM ───────────────────────────────────────────────────────
+      FIREBASE_PROJECT_ID:    ${FIREBASE_PROJECT_ID}
+      FIREBASE_CLIENT_EMAIL:  ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY:   ${FIREBASE_PRIVATE_KEY}
+    networks:
+      - backend       # inter-service (redis, minio, taxi-svc, ai-svc)
+      - core_db_net   # изолированный доступ к core_db
+    healthcheck:
+      # /api/health — с учётом setGlobalPrefix('api') в main.ts
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s    # Prisma migrate deploy + NestJS boot
     depends_on:
       core_db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   taxi-svc:
@@ -107,13 +176,33 @@ services:
     container_name: taxi_svc
     restart: unless-stopped
     ports:
-      - "3002:3002"
+      - "${TAXI_PORT:-3002}:3002"
     environment:
-      DATABASE_URL: postgresql://taxi_user:taxi_pass@taxi_db:5432/taxi_db
-      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      PORT: 3002
+      DATABASE_URL:   postgresql://${TAXI_DB_USER}:${TAXI_DB_PASSWORD}@taxi_db:5432/${TAXI_DB_NAME}?connection_limit=10&pool_timeout=30
+      JWT_SECRET:     ${JWT_SECRET}
+      REDIS_HOST:     redis
+      REDIS_PORT:     6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      PORT:           3002
+      CORE_SVC_URL:   http://core-svc:3001
+      ADMIN_KEY:      ${ADMIN_KEY}
+      # ── Sentry ──────────────────────────────────────────────────────────────
+      SENTRY_DSN:     ${SENTRY_DSN:-}
+      NODE_ENV:       ${NODE_ENV:-production}
+      # ── Firebase / FCM ───────────────────────────────────────────────────────
+      FIREBASE_PROJECT_ID:   ${FIREBASE_PROJECT_ID}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY:  ${FIREBASE_PRIVATE_KEY}
+    networks:
+      - backend       # inter-service (redis, core-svc для внутренних вызовов)
+      - taxi_db_net   # изолированный доступ к taxi_db
+    healthcheck:
+      # /health без globalPrefix — taxi-svc регистрирует его вручную в main.ts
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s    # Prisma migrate deploy + NestJS boot
     depends_on:
       taxi_db:
         condition: service_healthy
@@ -127,24 +216,35 @@ services:
     container_name: gateway_api
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${GATEWAY_PORT:-3000}:3000"
     environment:
-      PORT: 3000
-      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
-      CORE_SVC_URL: http://core-svc:3001
-      TAXI_SVC_URL: http://taxi-svc:3002
-      AI_SVC_URL: http://ai-svc:8000
-      CORE_DB_URL: postgresql://core_user:core_pass@core_db:5432/core_db
-      TAXI_DB_URL: postgresql://taxi_user:taxi_pass@taxi_db:5432/taxi_db
-      ADMIN_COOKIE_SECRET: senimdi-qadam-admin-cookie-2026
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT:                3000
+      JWT_SECRET:          ${JWT_SECRET}
+      CORE_SVC_URL:        http://core-svc:3001
+      TAXI_SVC_URL:        http://taxi-svc:3002
+      AI_SVC_URL:          http://ai-svc:8000
+      CORE_DB_URL:         postgresql://${CORE_DB_USER}:${CORE_DB_PASSWORD}@core_db:5432/${CORE_DB_NAME}
+      TAXI_DB_URL:         postgresql://${TAXI_DB_USER}:${TAXI_DB_PASSWORD}@taxi_db:5432/${TAXI_DB_NAME}
+      ADMIN_COOKIE_SECRET: ${ADMIN_COOKIE_SECRET}
+      REDIS_HOST:          redis
+      REDIS_PORT:          6379
+      REDIS_PASSWORD:      ${REDIS_PASSWORD}
+      FRONTEND_URL:        ${FRONTEND_URL:-http://localhost:5173}
+    networks:
+      - backend   # проксирует запросы к сервисам
+      - admin     # прямой доступ к core_db + taxi_db для AdminJS
     depends_on:
       core_db:
         condition: service_healthy
       taxi_db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      # Ждём пока upstream сервисы полностью поднялись — иначе gateway
+      # начнёт отдавать 502 Bad Gateway на первые запросы.
+      core-svc:
+        condition: service_healthy
+      taxi-svc:
         condition: service_healthy
 
   ai-svc:
@@ -154,12 +254,73 @@ services:
     container_name: ai_svc
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${AI_PORT:-8000}:8000"
     environment:
-      DATABASE_URL: postgresql://ai_user:ai_pass@ai_db:5432/ai_db
-      JWT_SECRET: senimdi-qadam-super-secret-jwt-key-2026
+      DATABASE_URL:             postgresql://${AI_DB_USER}:${AI_DB_PASSWORD}@ai_db:5432/${AI_DB_NAME}
+      JWT_SECRET:               ${JWT_SECRET}
+      REDIS_HOST:               redis
+      REDIS_PORT:               6379
+      REDIS_PASSWORD:           ${REDIS_PASSWORD}
+      CORE_SVC_URL:             http://core-svc:3001
+      AZURE_OPENAI_ENDPOINT:    ${AZURE_OPENAI_ENDPOINT}
+      AZURE_OPENAI_API_KEY:     ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_DEPLOYMENT:            ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+      AZURE_OPENAI_API_VERSION:           ${AZURE_OPENAI_API_VERSION:-2025-01-01-preview}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT:  ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:-text-embedding-3-small}
+      # ── Sentry ──────────────────────────────────────────────────────────────
+      SENTRY_DSN:   ${SENTRY_DSN:-}
+      ENV:          ${NODE_ENV:-production}
+    networks:
+      - backend       # inter-service (redis, core-svc для валидации токенов)
+      - ai_db_net     # изолированный доступ к ai_db
+    healthcheck:
+      # FastAPI регистрирует /health в main.py
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s    # Whisper model load при старте может занять ~30-40с
     depends_on:
       ai_db:
+        condition: service_healthy
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MONITORING
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: senimdi_prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: senimdi_grafana
+    restart: unless-stopped
+    ports:
+      - "3010:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER:     ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-senimdi_grafana}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
         condition: service_healthy
 
 volumes:
@@ -167,3 +328,42 @@ volumes:
   taxi_db_data:
   ai_db_data:
   redis_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+# ─── Docker Networks ──────────────────────────────────────────────────────────
+# Принцип минимальных привилегий на уровне сети:
+#
+#  backend      — публичная сервисная сеть: redis, minio, и все API-сервисы
+#                 видят друг друга. Нет прямого доступа к БД.
+#
+#  core_db_net  — изолированная, internal. Только core-svc ↔ core_db.
+#                 taxi-svc и ai-svc физически не могут достучаться до core_db.
+#
+#  taxi_db_net  — изолированная, internal. Только taxi-svc ↔ taxi_db.
+#                 core-svc и ai-svc не видят taxi_db.
+#
+#  ai_db_net    — изолированная, internal. Только ai-svc ↔ ai_db.
+#                 Ни gateway, ни другие сервисы не видят ai_db.
+#
+#  admin        — изолированная, internal. gateway-api ↔ core_db + taxi_db.
+#                 Нужна AdminJS-у для прямого чтения/записи в обе БД.
+#                 ai_db намеренно исключена — AdminJS её не использует.
+#
+# Итог: компрометация одного сервиса не даёт доступ к чужим БД.
+networks:
+  backend:
+    driver: bridge
+  core_db_net:
+    driver: bridge
+    internal: true   # нет исходящего интернета; только core-svc + core_db
+  taxi_db_net:
+    driver: bridge
+    internal: true   # нет исходящего интернета; только taxi-svc + taxi_db
+  ai_db_net:
+    driver: bridge
+    internal: true   # нет исходящего интернета; только ai-svc + ai_db
+  admin:
+    driver: bridge
+    internal: true   # нет исходящего интернета; gateway-api → core_db + taxi_db

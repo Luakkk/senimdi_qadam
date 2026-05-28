@@ -14,7 +14,8 @@ import { BookingStatus } from '@prisma/client';
 import { ManagerService } from './manager.service';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
-import { JwtAuthGuard, RolesGuard, Roles } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard, Roles } from '../auth/roles.guard';
 
 @ApiTags('Manager')
 @ApiBearerAuth()

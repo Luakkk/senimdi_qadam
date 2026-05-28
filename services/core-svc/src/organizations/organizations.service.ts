@@ -1,7 +1,16 @@
-import { Injectable } from '@nestjs/common';
-import { OrgStatus } from '@prisma/client';
+import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
+import { OrgStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { ListOrganizationsQuery } from './dto/list-organizations.query';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
+import { CreateOrgServiceDto } from './dto/create-org-service.dto';
+import { UpdateOrgServiceDto } from './dto/update-org-service.dto';
+import { RegisterOrganizationDto } from './dto/register-organization.dto';
+
+// TTL кэша: каталог — 5 минут, одна организация — 10 минут
+const ORG_LIST_TTL = 300;
+const ORG_ITEM_TTL = 600;
 
 function toRad(x: number) {
   return (x * Math.PI) / 180;
@@ -20,32 +29,126 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  // ── Redis helpers ─────────────────────────────────────────────────────────
+
+  private orgItemKey(id: string) { return `org:${id}`; }
+
+  // Ключ списка включает все параметры запроса для точной инвалидации
+  private orgListKey(q: ListOrganizationsQuery) {
+    return `org:list:${JSON.stringify(q)}`;
+  }
+
+  /** Инвалидируем кэш конкретной организации.
+   *  Список сбросить точечно сложно (много ключей), поэтому используем
+   *  tag-based инвалидацию: ключ org:list:* в dev удаляем вручную.
+   *  В prod при VERIFIED каталогах хватает TTL 5 минут.
+   */
+  private async invalidateOrgCache(id: string) {
+    try {
+      await this.redis.del(this.orgItemKey(id));
+    } catch { /* не блокируем бизнес-логику если Redis недоступен */ }
+  }
+
+  // ─── SELF-REGISTRATION ────────────────────────────────────────────────────
+  // Любой авторизованный пользователь может подать заявку на регистрацию
+  // организации. Статус: PENDING — на рассмотрении у администратора.
+  // Пользователь получает роль ORG_MANAGER автоматически.
+  async register(userId: string, dto: RegisterOrganizationDto) {
+    // Проверяем, нет ли уже организации у этого менеджера
+    const existing = await this.prisma.organization.findFirst({ where: { managerId: userId } });
+    if (existing) {
+      throw new ConflictException('Вы уже подали заявку или управляете организацией');
+    }
+
+    const org = await this.prisma.organization.create({
+      data: {
+        nameRu:       dto.nameRu,
+        nameKk:       dto.nameKk        ?? null,
+        category:     dto.category      ?? 'OTHER',
+        description:  dto.description   ?? null,
+        address:      dto.address       ?? null,
+        city:         dto.city          ?? 'Алматы',
+        phone:        dto.phone         ?? null,
+        email:        dto.email         ?? null,
+        website:      dto.website       ?? null,
+        instagram:    dto.instagram     ?? null,
+        lat:          dto.lat           ?? null,
+        lon:          dto.lon           ?? null,
+        isAccessible: dto.isAccessible  ?? true,
+        workingHours: dto.workingHours  ?? null,
+        status:       OrgStatus.PENDING,
+        managerId:    userId,
+      },
+    });
+
+    // Повышаем роль пользователя до ORG_MANAGER
+    await this.prisma.user.update({
+      where: { id: userId },
+      data:  { role: Role.ORG_MANAGER },
+    });
+
+    return {
+      message: 'Заявка принята. Администратор рассмотрит её в течение 3–5 рабочих дней.',
+      organizationId: org.id,
+      status: org.status,
+    };
+  }
 
   async list(q: ListOrganizationsQuery) {
-    const where: any = {};
+    // Кэшируем ответ на 5 минут. Ключ включает все параметры запроса.
+    // При поиске (q.q) кэш не используем — результаты слишком разнообразны.
+    const useCache = !q.q;
+    if (useCache) {
+      try {
+        const cached = await this.redis.get(this.orgListKey(q));
+        if (cached) return JSON.parse(cached);
+      } catch { /* продолжаем без кэша */ }
+    }
 
-    // nameRu (раньше было name — в схеме поле называется nameRu)
-    if (q.q) where.nameRu = { contains: q.q, mode: 'insensitive' };
+    // По умолчанию показываем только верифицированные организации
+    const where: any = { status: OrgStatus.VERIFIED };
 
-    // category (раньше было type)
-    if (q.category) where.category = q.category;
+    if (q.q)        where.nameRu    = { contains: q.q, mode: 'insensitive' };
+    if (q.category) where.category  = q.category;
+    if (q.city)     where.city      = q.city;
 
-    // city (раньше было district)
-    if (q.city) where.city = q.city;
-
-    if (q.verified === 'true') where.status = OrgStatus.VERIFIED;
-
-    return this.prisma.organization.findMany({
+    const result = await this.prisma.organization.findMany({
       where,
       take: q.limit ?? 50,
       skip: q.offset ?? 0,
       orderBy: { updatedAt: 'desc' },
     });
+
+    if (useCache) {
+      try {
+        await this.redis.set(this.orgListKey(q), JSON.stringify(result), ORG_LIST_TTL);
+      } catch { /* некритично */ }
+    }
+
+    return result;
   }
 
-  getById(id: string) {
-    return this.prisma.organization.findUnique({ where: { id } });
+  async getById(id: string) {
+    // Кэш на 10 минут — инвалидируется при обновлении организации
+    try {
+      const cached = await this.redis.get(this.orgItemKey(id));
+      if (cached) return JSON.parse(cached);
+    } catch { /* продолжаем без кэша */ }
+
+    const org = await this.prisma.organization.findUnique({ where: { id } });
+
+    if (org) {
+      try {
+        await this.redis.set(this.orgItemKey(id), JSON.stringify(org), ORG_ITEM_TTL);
+      } catch { /* некритично */ }
+    }
+
+    return org;
   }
 
   // ── Полнотекстовый поиск для AI-ассистента ───────────────────────────────
@@ -60,8 +163,9 @@ export class OrganizationsService {
       { address:      { contains: query, mode: 'insensitive' } },
     ];
 
+    // Только VERIFIED — непроверенные организации не показываем пользователям
     const where: any = {
-      status: { in: ['VERIFIED', 'PENDING'] },
+      status: OrgStatus.VERIFIED,
     };
 
     if (category) {
@@ -90,10 +194,10 @@ export class OrganizationsService {
       take: limit,
     });
 
-    // Fallback: если ничего не нашли — вернём топ-5 по рейтингу
+    // Fallback: если ничего не нашли — вернём топ-5 верифицированных по рейтингу
     if (orgs.length === 0) {
       return this.prisma.organization.findMany({
-        where: { status: { in: ['VERIFIED', 'PENDING'] } },
+        where: { status: OrgStatus.VERIFIED },
         select: {
           nameRu: true, category: true, address: true, city: true,
           phone: true, website: true, description: true,
@@ -149,6 +253,164 @@ export class OrganizationsService {
       this.prisma.savedOrganization.count({ where: { userId } }),
     ]);
     return { items: items.map(s => s.organization), total };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ORG_MANAGER PORTAL
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Возвращает организацию, управляемую данным менеджером
+  private async requireManagedOrg(managerId: string) {
+    const org = await this.prisma.organization.findFirst({ where: { managerId } });
+    if (!org) throw new NotFoundException('У вас нет привязанной организации');
+    return org;
+  }
+
+  // ── GET /organizations/mine ────────────────────────────────────────────────
+  async getMine(managerId: string) {
+    return this.requireManagedOrg(managerId);
+  }
+
+  // ── PATCH /organizations/mine ──────────────────────────────────────────────
+  async updateMine(managerId: string, dto: UpdateOrganizationDto) {
+    const org = await this.requireManagedOrg(managerId);
+    const updated = await this.prisma.organization.update({
+      where: { id: org.id },
+      data: {
+        ...(dto.nameRu        !== undefined && { nameRu:        dto.nameRu }),
+        ...(dto.nameKk        !== undefined && { nameKk:        dto.nameKk }),
+        ...(dto.nameEn        !== undefined && { nameEn:        dto.nameEn }),
+        ...(dto.description   !== undefined && { description:   dto.description }),
+        ...(dto.address       !== undefined && { address:       dto.address }),
+        ...(dto.city          !== undefined && { city:          dto.city }),
+        ...(dto.phone         !== undefined && { phone:         dto.phone }),
+        ...(dto.email         !== undefined && { email:         dto.email }),
+        ...(dto.website       !== undefined && { website:       dto.website }),
+        ...(dto.instagram     !== undefined && { instagram:     dto.instagram }),
+        ...(dto.lat           !== undefined && { lat:           dto.lat }),
+        ...(dto.lon           !== undefined && { lon:           dto.lon }),
+        ...(dto.isAccessible  !== undefined && { isAccessible:  dto.isAccessible }),
+        ...(dto.workingHours  !== undefined && { workingHours:  dto.workingHours }),
+      },
+    });
+    // Инвалидируем кэш этой организации после обновления
+    await this.invalidateOrgCache(org.id);
+    return updated;
+  }
+
+  // ── GET /organizations/mine/services ──────────────────────────────────────
+  async listMyServices(managerId: string) {
+    const org = await this.requireManagedOrg(managerId);
+    return this.prisma.orgService.findMany({
+      where: { organizationId: org.id },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  // ── POST /organizations/mine/services ─────────────────────────────────────
+  async createMyService(managerId: string, dto: CreateOrgServiceDto) {
+    const org = await this.requireManagedOrg(managerId);
+    return this.prisma.orgService.create({
+      data: {
+        organizationId: org.id,
+        nameRu:        dto.nameRu,
+        nameKk:        dto.nameKk        ?? null,
+        descriptionRu: dto.descriptionRu ?? null,
+        price:         dto.price         ?? 0,
+        isActive:      dto.isActive      ?? true,
+      },
+    });
+  }
+
+  // ── PATCH /organizations/mine/services/:serviceId ─────────────────────────
+  async updateMyService(managerId: string, serviceId: string, dto: UpdateOrgServiceDto) {
+    const org = await this.requireManagedOrg(managerId);
+    const svc = await this.prisma.orgService.findUnique({ where: { id: serviceId } });
+    if (!svc) throw new NotFoundException('Услуга не найдена');
+    if (svc.organizationId !== org.id) throw new ForbiddenException('Нет доступа');
+
+    return this.prisma.orgService.update({
+      where: { id: serviceId },
+      data: {
+        ...(dto.nameRu        !== undefined && { nameRu:        dto.nameRu }),
+        ...(dto.nameKk        !== undefined && { nameKk:        dto.nameKk }),
+        ...(dto.descriptionRu !== undefined && { descriptionRu: dto.descriptionRu }),
+        ...(dto.price         !== undefined && { price:         dto.price }),
+        ...(dto.isActive      !== undefined && { isActive:      dto.isActive }),
+      },
+    });
+  }
+
+  // ── DELETE /organizations/mine/services/:serviceId ────────────────────────
+  async deleteMyService(managerId: string, serviceId: string) {
+    const org = await this.requireManagedOrg(managerId);
+    const svc = await this.prisma.orgService.findUnique({ where: { id: serviceId } });
+    if (!svc) throw new NotFoundException('Услуга не найдена');
+    if (svc.organizationId !== org.id) throw new ForbiddenException('Нет доступа');
+
+    await this.prisma.orgService.delete({ where: { id: serviceId } });
+    return { message: 'Услуга удалена' };
+  }
+
+  // ── GET /organizations/mine/analytics ─────────────────────────────────────
+  async getMyAnalytics(managerId: string) {
+    const org = await this.requireManagedOrg(managerId);
+
+    const [savedCount, reviewCount, ratingData, servicesCount] = await Promise.all([
+      this.prisma.savedOrganization.count({ where: { organizationId: org.id } }),
+      this.prisma.orgReview.count({ where: { organizationId: org.id } }),
+      this.prisma.orgReview.aggregate({
+        where: { organizationId: org.id },
+        _avg: { rating: true },
+        _min: { rating: true },
+        _max: { rating: true },
+      }),
+      this.prisma.orgService.count({ where: { organizationId: org.id, isActive: true } }),
+    ]);
+
+    return {
+      organizationId: org.id,
+      nameRu:         org.nameRu,
+      status:         org.status,
+      savedByCount:   savedCount,
+      reviews: {
+        total:    reviewCount,
+        avgRating: ratingData._avg.rating ?? 0,
+        minRating: ratingData._min.rating ?? 0,
+        maxRating: ratingData._max.rating ?? 0,
+      },
+      activeServicesCount: servicesCount,
+    };
+  }
+
+  // ── GET /organizations/mine/saved-users ───────────────────────────────────
+  // Кто сохранил мою организацию — потенциальные клиенты
+  async getMySavedUsers(managerId: string, limit = 20, offset = 0) {
+    const org = await this.requireManagedOrg(managerId);
+
+    const [items, total] = await Promise.all([
+      this.prisma.savedOrganization.findMany({
+        where: { organizationId: org.id },
+        orderBy: { createdAt: 'desc' },
+        take: Number(limit),
+        skip: Number(offset),
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              role: true,
+              profile: {
+                select: { firstName: true, lastName: true, phone: true, city: true, disabilityType: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.savedOrganization.count({ where: { organizationId: org.id } }),
+    ]);
+
+    return { items: items.map(s => s.user), total };
   }
 
   async nearby(params: { lat: number; lon: number; radius: number; verified?: boolean }) {

@@ -1,9 +1,11 @@
 // gateway-api — копия taxi_db схемы для AdminJS
+// ⚠️  СИНХРОНИЗИРОВАТЬ при изменении services/taxi-svc/prisma/schema.prisma
 // Prisma генерирует клиент в generated/taxi
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../generated/taxi"
+  provider      = "prisma-client-js"
+  output        = "../../generated/taxi"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -45,6 +47,20 @@ enum MessageSender {
   MANAGER
 }
 
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethod {
+  CASH
+  KASPI
+  CARD
+}
+
 model TaxiManager {
   id        String   @id @default(uuid())
   userId    String   @unique
@@ -55,17 +71,21 @@ model TaxiManager {
   createdAt DateTime @default(now())
 
   bookings Booking[]
+  messages BookingMessage[]
 }
 
 model Driver {
   id           String       @id @default(uuid())
+  userId       String?      @unique
   firstName    String
   lastName     String
   phone        String       @unique
+  whatsapp     String?
   vehicleType  VehicleType  @default(WHEELCHAIR_VAN)
   vehicleModel String?
   licensePlate String       @unique
   status       DriverStatus @default(ACTIVE)
+  fcmToken     String?
   ratingAvg    Float        @default(0)
   ratingCount  Int          @default(0)
   totalTrips   Int          @default(0)
@@ -77,23 +97,45 @@ model Driver {
 }
 
 model Booking {
-  id             String        @id @default(uuid())
-  userId         String
-  managerId      String?
-  manager        TaxiManager?  @relation(fields: [managerId], references: [id])
-  driverId       String?
-  driver         Driver?       @relation(fields: [driverId], references: [id])
-  fromAddress    String
-  toAddress      String
-  scheduledAt    DateTime
-  disabilityType DisabilityType
-  note           String?
-  status         BookingStatus  @default(PENDING)
-  cancelReason   String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id              String         @id @default(uuid())
+  userId          String
+  managerId       String?
+  manager         TaxiManager?   @relation(fields: [managerId], references: [id])
+  driverId        String?
+  driver          Driver?        @relation(fields: [driverId], references: [id])
+  fromAddress     String
+  toAddress       String
+  fromLat         Float?
+  fromLon         Float?
+  toLat           Float?
+  toLon           Float?
+  scheduledAt     DateTime
+  disabilityType  DisabilityType
+  note            String?
+  status          BookingStatus  @default(PENDING)
+  cancelReason    String?
+  estimatedPrice  Float?
+  paymentStatus   PaymentStatus  @default(UNPAID)
+  paymentMethod   PaymentMethod?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
-  review DriverReview?
+  messages     BookingMessage[]
+  review       DriverReview?
+  transactions PaymentTransaction[]
+}
+
+model BookingMessage {
+  id         String        @id @default(uuid())
+  bookingId  String
+  booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  managerId  String?
+  manager    TaxiManager?  @relation(fields: [managerId], references: [id])
+  senderId   String
+  senderType MessageSender
+  text       String
+  isRead     Boolean       @default(false)
+  createdAt  DateTime      @default(now())
 }
 
 model DriverReview {
@@ -115,4 +157,38 @@ model ManagerInvite {
   usedAt    DateTime?
   expiresAt DateTime
   createdAt DateTime  @default(now())
+}
+
+model RecurringBooking {
+  id              String         @id @default(uuid())
+  userId          String
+  fromAddress     String
+  toAddress       String
+  fromLat         Float?
+  fromLon         Float?
+  toLat           Float?
+  toLon           Float?
+  disabilityType  DisabilityType
+  note            String?
+  cronExpression  String
+  isActive        Boolean        @default(true)
+  lastTriggeredAt DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model PaymentTransaction {
+  id          String        @id @default(uuid())
+  bookingId   String
+  booking     Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId      String
+  amount      Float
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+  externalId  String?
+  externalUrl String?
+  metadata    Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }

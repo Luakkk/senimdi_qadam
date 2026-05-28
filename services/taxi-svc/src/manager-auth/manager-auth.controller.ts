@@ -9,7 +9,8 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ManagerAuthService } from './manager-auth.service';
 import { RegisterManagerDto } from './dto/register-manager.dto';
-import { JwtAuthGuard, RolesGuard, Roles } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard, Roles } from '../auth/roles.guard';
 
 @ApiTags('Manager Auth')
 @ApiBearerAuth()

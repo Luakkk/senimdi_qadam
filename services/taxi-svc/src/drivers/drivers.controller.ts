@@ -14,7 +14,8 @@ import { DriverStatus } from '@prisma/client';
 import { DriversService } from './drivers.service';
 import { CreateDriverDto } from './dto/create-driver.dto';
 import { CreateReviewDto } from './dto/create-review.dto';
-import { JwtAuthGuard, RolesGuard, Roles } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard, Roles } from '../auth/roles.guard';
 
 @ApiTags('Drivers')
 @ApiBearerAuth()

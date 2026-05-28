@@ -1,9 +1,11 @@
 // gateway-api — копия core_db схемы для AdminJS
+// ⚠️  СИНХРОНИЗИРОВАТЬ при изменении services/core-svc/prisma/schema.prisma
 // Prisma генерирует клиент в generated/core
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../../generated/core"
+  provider      = "prisma-client-js"
+  output        = "../../generated/core"
+  binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
@@ -76,42 +78,53 @@ enum NewsCommentStatus {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String?
-  role         Role     @default(USER)
-  isVerified   Boolean  @default(false)
-  isActive     Boolean  @default(true)
-  googleId     String?  @unique
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String?
+  role          Role     @default(USER)
+  isVerified    Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  googleId      String?  @unique
+  totpSecret    String?
+  isTotpEnabled Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  profile     UserProfile?
-  tickets     Ticket[]
-  complaints  Complaint[]
-  news        News[]
+  profile       UserProfile?
+  tickets       Ticket[]
+  complaints    Complaint[]
+  news          News[]
+  guides        Guide[]        @relation("AuthoredGuides")
+  deviceTokens  DeviceToken[]
+  notifications Notification[]
+  auditLogs     AuditLog[]     @relation("AuditActor")
+  managedOrgs   Organization[] @relation("OrgManager")
 }
 
 model UserProfile {
-  id             String          @id @default(uuid())
-  userId         String          @unique
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName      String
-  lastName       String
-  phone          String?
-  city           String?
-  disabilityType DisabilityType?
-  avatarUrl      String?
-  lat            Float?
-  lon            Float?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  id                 String          @id @default(uuid())
+  userId             String          @unique
+  user               User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName          String?
+  lastName           String?
+  phone              String?
+  birthDate          DateTime?
+  city               String?
+  disabilityType     DisabilityType?
+  disabilityNote     String?
+  avatarUrl          String?
+  lat                Float?
+  lon                Float?
+  accessibilityPrefs Json?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 }
 
 model Organization {
   id           String      @id @default(uuid())
   nameRu       String
   nameKk       String?
+  nameEn       String?
   category     OrgCategory @default(OTHER)
   status       OrgStatus   @default(PENDING)
   description  String?
@@ -120,24 +133,71 @@ model Organization {
   phone        String?
   email        String?
   website      String?
+  instagram    String?
   lat          Float?
   lon          Float?
+  managerId    String?
+  manager      User?       @relation("OrgManager", fields: [managerId], references: [id])
   isAccessible Boolean     @default(true)
+  workingHours String?
   ratingAvg    Float?
   ratingCount  Int         @default(0)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+
+  verificationLogs VerificationLog[]
+  services         OrgService[]
+  reviews          OrgReview[]
+}
+
+model OrgService {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nameRu         String
+  nameKk         String?
+  descriptionRu  String?
+  isActive       Boolean      @default(true)
+  price          Float?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model OrgReview {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  rating         Int
+  comment        String?
+  isVerified     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model VerificationLog {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  moderatorId    String?
+  status         OrgStatus
+  statusFrom     OrgStatus?
+  statusTo       OrgStatus?
+  method         String?
+  comment        String?
+  createdAt      DateTime     @default(now())
 }
 
 model Ticket {
-  id        String       @id @default(uuid())
-  userId    String
-  user      User         @relation(fields: [userId], references: [id])
-  subject   String
-  body      String
-  status    TicketStatus @default(OPEN)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id])
+  subject    String
+  body       String
+  status     TicketStatus @default(OPEN)
+  assigneeId String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 }
 
 model Complaint {
@@ -154,19 +214,21 @@ model Complaint {
 }
 
 model News {
-  id           String     @id @default(uuid())
-  authorId     String
-  author       User       @relation(fields: [authorId], references: [id])
-  titleRu      String
-  bodyRu       String
-  imageUrl     String?
-  status       NewsStatus @default(PENDING)
-  rejectReason String?
-  likesCount   Int        @default(0)
-  commentsCount Int       @default(0)
-  publishedAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id            String     @id @default(uuid())
+  authorId      String
+  author        User       @relation(fields: [authorId], references: [id])
+  titleRu       String
+  titleKk       String?
+  bodyRu        String
+  bodyKk        String?
+  imageUrl      String?
+  status        NewsStatus @default(PENDING)
+  rejectReason  String?
+  publishedAt   DateTime?
+  likesCount    Int        @default(0)
+  commentsCount Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   comments NewsComment[]
 }
@@ -180,4 +242,54 @@ model NewsComment {
   status    NewsCommentStatus @default(PENDING)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
+}
+
+model Guide {
+  id          String   @id @default(uuid())
+  titleRu     String
+  titleKk     String?
+  bodyRu      String
+  bodyKk      String?
+  category    String?
+  tags        String[]
+  isPublished Boolean  @default(false)
+  authorId    String?
+  author      User?    @relation("AuthoredGuides", fields: [authorId], references: [id], onDelete: SetNull)
+  likesCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  type      String
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  actor      User     @relation("AuditActor", fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
 }

@@ -1,13 +1,24 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrgCategory, OrgStatus } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { Resend } from 'resend';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { VerifyOrganizationDto } from './dto/verify-organization.dto';
 
 @Injectable()
 export class AdminOrganizationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly resend: Resend;
+
+  constructor(
+    private readonly prisma:  PrismaService,
+    private readonly config:  ConfigService,
+    private readonly audit:   AuditService,
+  ) {
+    this.resend = new Resend(this.config.get('RESEND_API_KEY'));
+  }
 
   // ── LIST ────────────────────────────────────────────────────────────────
   async findAll(params: {
@@ -89,7 +100,7 @@ export class AdminOrganizationsService {
   }
 
   // ── VERIFY ──────────────────────────────────────────────────────────────
-  async verify(id: string, dto: VerifyOrganizationDto) {
+  async verify(id: string, dto: VerifyOrganizationDto, actorId?: string, ip?: string) {
     const org = await this.prisma.organization.findUnique({ where: { id } });
     if (!org) throw new NotFoundException('Organization not found');
 
@@ -102,15 +113,84 @@ export class AdminOrganizationsService {
       await tx.verificationLog.create({
         data: {
           organizationId: id,
-          statusFrom: org.status,
-          statusTo: dto.statusTo,
-          method: dto.method,
+          status:     dto.statusTo,         // итог = statusTo
+          statusFrom: org.status,           // предыдущий статус
+          statusTo:   dto.statusTo,         // новый статус
+          method:     dto.method ?? null,
           moderatorId: dto.moderatorId ?? null,
           comment: dto.comment ?? null,
-        } as any,
+        },
       });
 
+      // Send email notification to the manager if email is available
+      if (org.managerId) {
+        this.notifyManagerStatusChange(org.managerId, org.nameRu, org.status, dto.statusTo, dto.comment).catch(() => {});
+      }
+
+      // Audit log
+      if (actorId) {
+        this.audit.log({
+          actorId,
+          action:     `ORG_${dto.statusTo}`,
+          targetType: 'Organization',
+          targetId:   id,
+          metadata:   { from: org.status, to: dto.statusTo, comment: dto.comment },
+          ip,
+        }).catch(() => {});
+      }
+
       return updated;
+    });
+  }
+
+  // ── EMAIL: notify manager on status change ───────────────────────────────
+  private async notifyManagerStatusChange(
+    managerId: string,
+    orgNameRu: string,
+    fromStatus: OrgStatus,
+    toStatus: OrgStatus,
+    comment?: string | null,
+  ) {
+    const manager = await this.prisma.user.findUnique({ where: { id: managerId }, select: { email: true } });
+    if (!manager?.email) return;
+
+    const isApproved = toStatus === OrgStatus.VERIFIED;
+    const isRejected = toStatus === OrgStatus.REJECTED;
+    if (!isApproved && !isRejected && toStatus !== OrgStatus.SUSPENDED) return;
+
+    const subject = isApproved
+      ? `✅ Ваша организация одобрена — ${orgNameRu}`
+      : isRejected
+        ? `❌ Заявка отклонена — ${orgNameRu}`
+        : `⚠️ Статус организации изменён — ${orgNameRu}`;
+
+    const bodyHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+        <h2 style="color: #2563eb;">SenimdiQAdam</h2>
+        <p>Здравствуйте,</p>
+        <p>Статус вашей организации <strong>${orgNameRu}</strong> был изменён:</p>
+        <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+          <tr>
+            <td style="padding: 8px; border: 1px solid #e2e8f0; color: #64748b;">Было</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${fromStatus}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #e2e8f0; color: #64748b;">Стало</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: bold; color: ${isApproved ? '#16a34a' : '#dc2626'};">${toStatus}</td>
+          </tr>
+          ${comment ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0; color: #64748b;">Комментарий</td><td style="padding: 8px; border: 1px solid #e2e8f0;">${comment}</td></tr>` : ''}
+        </table>
+        ${isApproved ? '<p>🎉 Ваша организация теперь видна всем пользователям платформы!</p>' : ''}
+        ${isRejected ? '<p>Если у вас есть вопросы, ответьте на это письмо.</p>' : ''}
+        <p style="color: #64748b; font-size: 13px;">С уважением, команда SenimdiQAdam</p>
+      </div>
+    `;
+
+    await this.resend.emails.send({
+      from:    this.config.get('EMAIL_FROM') || 'noreply@senimdi-qadam.kz',
+      to:      manager.email,
+      subject,
+      html:    bodyHtml,
     });
   }
 

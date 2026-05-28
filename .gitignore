@@ -34,6 +34,19 @@ venv/
 .vscode/
 Thumbs.db
 
-# ── Garbage files ────────────────────────────────────────────
+# ── Prisma generated clients (генерируются при сборке, не хранить в git) ─────
+services/gateway-api/generated/
+services/core-svc/generated/
+services/taxi-svc/generated/
+
+# ── Garbage files ─────────────────────────────────────────────────────────────
 *.~lock.*
-1ўexport
+"* 2.*"
+*\ 2.*
+
+# ── Локальные экспорты и таблицы (не нужны в репо) ────────────────────────────
+*.xlsx
+*.xls
+1*export
+*export
+package-lock 2.json

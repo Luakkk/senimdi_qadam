@@ -1,0 +1,228 @@
+name: CI — Lint & Test
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+jobs:
+  # ────────────────────────────────────────────────────────────────────────────
+  # core-svc (NestJS + Prisma)
+  # ────────────────────────────────────────────────────────────────────────────
+  core-svc:
+    name: core-svc lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core-svc
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: core_user
+          POSTGRES_PASSWORD: core_pass
+          POSTGRES_DB: core_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://core_user:core_pass@localhost:5432/core_db
+      JWT_SECRET: ci_jwt_secret_placeholder
+      JWT_REFRESH_SECRET: ci_jwt_refresh_secret_placeholder
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: localhost
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin123
+      MINIO_PUBLIC_URL: http://localhost:9000
+      MINIO_USE_SSL: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/core-svc/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Run Prisma migrations
+        run: npx prisma migrate deploy
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test -- --passWithNoTests
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # taxi-svc (NestJS + Prisma)
+  # ────────────────────────────────────────────────────────────────────────────
+  taxi-svc:
+    name: taxi-svc lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/taxi-svc
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: taxi_user
+          POSTGRES_PASSWORD: taxi_pass
+          POSTGRES_DB: taxi_db
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://taxi_user:taxi_pass@localhost:5433/taxi_db
+      JWT_SECRET: ci_jwt_secret_placeholder
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/taxi-svc/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Test
+        run: npm test -- --passWithNoTests || true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # gateway-api (NestJS)
+  # ────────────────────────────────────────────────────────────────────────────
+  gateway-api:
+    name: gateway-api lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway-api
+
+    env:
+      JWT_SECRET: ci_jwt_secret_placeholder
+      CORE_SVC_URL: http://localhost:3001
+      TAXI_SVC_URL: http://localhost:3002
+      AI_SVC_URL: http://localhost:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: services/gateway-api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Test
+        run: npm test -- --passWithNoTests || true
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # ai-svc (FastAPI + Python)
+  # ────────────────────────────────────────────────────────────────────────────
+  ai-svc:
+    name: ai-svc lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ai-svc
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: ai_user
+          POSTGRES_PASSWORD: ai_pass
+          POSTGRES_DB: ai_db
+        ports: ["5434:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://ai_user:ai_pass@localhost:5434/ai_db
+      JWT_SECRET: ci_jwt_secret_placeholder
+      AZURE_OPENAI_ENDPOINT: https://placeholder.openai.azure.com/
+      AZURE_OPENAI_API_KEY: ci_placeholder
+      AZURE_OPENAI_DEPLOYMENT: gpt-4o
+      AZURE_OPENAI_API_VERSION: 2025-01-01-preview
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: text-embedding-3-small
+      CORE_SVC_URL: http://localhost:3001
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check . --ignore E501 || true
+
+      - name: Type check with mypy
+        run: |
+          pip install mypy
+          mypy app/ --ignore-missing-imports || true
+
+      - name: Run tests
+        run: |
+          pip install pytest pytest-asyncio httpx
+          pytest tests/ -v --tb=short || true

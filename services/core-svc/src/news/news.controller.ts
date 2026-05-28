@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -13,8 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
+import { memoryStorage } from 'multer';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -24,6 +24,7 @@ import {
 } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { NewsService } from './news.service';
+import { MinioService } from '../minio/minio.service';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { ModerateNewsDto } from './dto/moderate-news.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -35,7 +36,10 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @ApiTags('News')
 @Controller('news')
 export class NewsController {
-  constructor(private readonly newsService: NewsService) {}
+  constructor(
+    private readonly newsService: NewsService,
+    private readonly minio: MinioService,
+  ) {}
 
   // ═══ ЛЕНТА НОВОСТЕЙ ═══════════════════════════════════════════════════════
 
@@ -49,7 +53,7 @@ export class NewsController {
     @Query('offset') offset = 0,
     @Query('sort')   sort: 'popular' | 'latest' = 'latest',
   ) {
-    return this.newsService.listPublished(Number(limit), Number(offset), sort);
+    return this.newsService.listPublished(Number(limit), sort);
   }
 
   @Get('my/list')
@@ -130,21 +134,13 @@ export class NewsController {
   @Post(':id/image')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Загрузить фото к новости (jpg/png/webp, макс 5MB)' })
+  @ApiOperation({ summary: 'Загрузить фото к новости (jpg/png/webp, макс 5MB) — хранится в MinIO' })
   @ApiConsumes('multipart/form-data')
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads/news',
-        filename: (_req, file, cb) => {
-          const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          cb(null, `${unique}${extname(file.originalname)}`);
-        },
-      }),
+      storage: memoryStorage(),
       limits: { fileSize: 5 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
-        // Проверяем и MIME-тип (из Content-Type) И расширение файла.
-        // Только расширение — небезопасно: можно загрузить evil.php.jpg
         const allowedMime = /^image\/(jpeg|png|webp)$/;
         const allowedExt  = /\.(jpg|jpeg|png|webp)$/i;
         if (!allowedMime.test(file.mimetype) || !allowedExt.test(file.originalname)) {
@@ -154,12 +150,19 @@ export class NewsController {
       },
     }),
   )
-  uploadImage(
+  async uploadImage(
     @Param('id') id: string,
     @UploadedFile() file: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.newsService.updateImage(id, req.user.sub, file.filename);
+    if (!file) throw new BadRequestException('Файл не загружен');
+    const url = await this.minio.upload(
+      MinioService.BUCKET_NEWS,
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+    );
+    return this.newsService.updateImage(id, req.user.sub, url);
   }
 
   @Patch(':id/moderate')

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from ..chat import simple_chat, rag_chat, emergency_chat, SITE_GUIDE
+from ..auth import require_any_user
+from ..limiter import limiter
 
 router = APIRouter(prefix="/chat", tags=["Chat / AI Ассистент"])
 
@@ -39,9 +41,10 @@ class EmergencyRequest(BaseModel):
 # ── Эндпоинты ─────────────────────────────────────────────────────────────────
 
 @router.post("/")
-def chat(body: ChatRequest):
+@limiter.limit("20/minute")
+def chat(request: Request, body: ChatRequest, _user: dict = Depends(require_any_user)):
     """
-    Обычный чат как ChatGPT.
+    Обычный чат как ChatGPT. Требует авторизации. Лимит: 20 req/min.
     Передавай всю историю сообщений — бот помнит контекст разговора.
     Опционально передай location чтобы AI знал где ты находишься.
     """
@@ -54,9 +57,10 @@ def chat(body: ChatRequest):
 
 
 @router.post("/rag")
-def chat_with_orgs(body: ChatRequest):
+@limiter.limit("20/minute")
+def chat_with_orgs(request: Request, body: ChatRequest, _user: dict = Depends(require_any_user)):
     """
-    Чат + поиск организаций из базы данных.
+    Чат + поиск организаций из базы данных. Требует авторизации. Лимит: 20 req/min.
     Если передать location — AI покажет организации рядом с пользователем
     и скажет расстояние до каждой.
     """
@@ -69,9 +73,11 @@ def chat_with_orgs(body: ChatRequest):
 
 
 @router.post("/emergency")
-def emergency(body: EmergencyRequest):
+@limiter.limit("10/minute")
+def emergency(request: Request, body: EmergencyRequest, _user: dict = Depends(require_any_user)):
     """
     Экстренная помощь — короткие чёткие инструкции + номера телефонов.
+    Требует авторизации. Лимит: 10 req/min.
     """
     try:
         answer = emergency_chat(body.message)

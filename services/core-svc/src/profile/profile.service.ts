@@ -89,8 +89,9 @@ export class ProfileService {
       },
       create: {
         userId,
-        firstName:      dto.firstName      ?? '',
-        lastName:       dto.lastName       ?? '',
+        // null вместо '' — пустая строка ломает отображение имени на фронтенде
+        firstName:      dto.firstName      ?? null,
+        lastName:       dto.lastName       ?? null,
         phone:          dto.phone          ?? null,
         birthDate:      dto.birthDate ? new Date(dto.birthDate) : null,
         city:           dto.city           ?? null,
@@ -104,14 +105,12 @@ export class ProfileService {
     return profile;
   }
 
-  // ── АВАТАР ────────────────────────────────────────────────────────────────
-  async updateAvatar(userId: string, filename: string) {
-    const avatarUrl = `/uploads/avatars/${filename}`;
-
+  // ── АВАТАР (URL из MinIO) ─────────────────────────────────────────────────
+  async updateAvatar(userId: string, avatarUrl: string) {
     await this.prisma.userProfile.upsert({
       where:  { userId },
       update: { avatarUrl },
-      create: { userId, firstName: '', lastName: '', avatarUrl },
+      create: { userId, firstName: null, lastName: null, avatarUrl },
     });
 
     await this.invalidatePublicCache(userId);
@@ -191,7 +190,7 @@ export class ProfileService {
     await this.prisma.userProfile.upsert({
       where:  { userId },
       update: { lat, lon },
-      create: { userId, firstName: '', lastName: '', lat, lon },
+      create: { userId, firstName: null, lastName: null, lat, lon },
     });
     await this.invalidatePublicCache(userId);
     return { lat, lon, message: 'Геолокация обновлена' };
@@ -241,11 +240,42 @@ export class ProfileService {
     return { items: items.map(l => l.guide), total };
   }
 
+  // ── Accessibility Preferences ─────────────────────────────────────────────
+  async getAccessibilityPrefs(userId: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { userId } });
+    return { accessibilityPrefs: profile?.accessibilityPrefs ?? {} };
+  }
+
+  async updateAccessibilityPrefs(userId: string, prefs: Record<string, any>) {
+    const profile = await this.prisma.userProfile.upsert({
+      where:  { userId },
+      update: { accessibilityPrefs: prefs },
+      create: { userId, firstName: null, lastName: null, accessibilityPrefs: prefs },
+    });
+    await this.invalidatePublicCache(userId);
+    return { accessibilityPrefs: profile.accessibilityPrefs };
+  }
+
   // ── Деактивировать аккаунт ────────────────────────────────────────────────
   async deactivate(userId: string) {
     await this.prisma.user.update({ where: { id: userId }, data: { isActive: false } });
     await this.invalidatePublicCache(userId);
     return { message: 'Аккаунт деактивирован' };
+  }
+
+  // ── FCM Device Tokens ─────────────────────────────────────────────────────
+  async registerDevice(userId: string, token: string, platform: string) {
+    await this.prisma.deviceToken.upsert({
+      where:  { token },
+      update: { userId, platform },
+      create: { userId, token, platform },
+    });
+    return { registered: true };
+  }
+
+  async unregisterDevice(userId: string, token: string) {
+    await this.prisma.deviceToken.deleteMany({ where: { userId, token } });
+    return { unregistered: true };
   }
 
   // ── Redis helpers ─────────────────────────────────────────────────────────

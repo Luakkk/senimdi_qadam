@@ -6,12 +6,16 @@ import {
 } from '@nestjs/common';
 import { BookingStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { BookingGateway } from '../gateways/booking.gateway';
 import { AssignDriverDto } from './dto/assign-driver.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 
 @Injectable()
 export class ManagerService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly gateway: BookingGateway,
+  ) {}
 
   // ─── Очередь заявок PENDING (FIFO — кто раньше подал) ─────────────────────
   async getQueue() {
@@ -95,7 +99,7 @@ export class ManagerService {
       }
 
       // 3. Возвращаем обновлённую заявку с деталями водителя
-      return tx.booking.findUnique({
+      const updated = await tx.booking.findUnique({
         where: { id: bookingId },
         include: {
           driver: {
@@ -112,6 +116,11 @@ export class ManagerService {
           },
         },
       });
+
+      // Уведомить пользователя через WebSocket
+      this.gateway.emitBookingStatusChanged(bookingId, BookingStatus.CONFIRMED, dto.driverId);
+
+      return updated;
     });
   }
 
@@ -133,19 +142,33 @@ export class ManagerService {
       );
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
         status: dto.status,
         ...(dto.cancelReason && { cancelReason: dto.cancelReason }),
       },
     });
+
+    // Real-time WebSocket event → user sees status change immediately
+    this.gateway.emitBookingStatusChanged(bookingId, dto.status);
+
+    return updated;
   }
 
   // ─── Список свободных водителей (для выбора при назначении) ───────────────
+  // ACTIVE = не отстранён. Дополнительно фильтруем: нет активных поездок
+  // (статус CONFIRMED или IN_PROGRESS), т.е. водитель реально свободен сейчас.
   async getAvailableDrivers() {
     return this.prisma.driver.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        bookings: {
+          none: {
+            status: { in: [BookingStatus.CONFIRMED, BookingStatus.IN_PROGRESS] },
+          },
+        },
+      },
       select: {
         id: true,
         firstName: true,

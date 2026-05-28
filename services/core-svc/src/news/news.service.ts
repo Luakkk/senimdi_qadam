@@ -7,6 +7,9 @@ import {
 } from '@nestjs/common';
 import { NewsStatus, NewsCommentStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { FcmService } from '../fcm/fcm.service';
+import DOMPurify from 'isomorphic-dompurify';
+import { buildCursorPage } from '../common/dto/cursor-pagination.dto';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { ModerateNewsDto } from './dto/moderate-news.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -14,40 +17,69 @@ import { ModerateCommentDto } from './dto/moderate-comment.dto';
 
 @Injectable()
 export class NewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fcm: FcmService,
+  ) {}
 
-  // ── Публичная лента: sort=popular (по лайкам) или sort=latest (по дате) ───
-  async listPublished(limit = 20, offset = 0, sort: 'popular' | 'latest' = 'latest') {
+  // ── Публичная лента (cursor-based pagination) ─────────────────────────────
+  // sort=popular (по лайкам) или sort=latest (по дате)
+  // cursor = id последней новости предыдущей страницы
+  //
+  // ⚠️ KNOWN TRADE-OFF: cursor pagination по `likesCount` нестабилен.
+  // Если пост получает лайк пока пользователь листает ленту — он может
+  // появиться дважды или пропасть. Это стандартный trade-off для мутабельных
+  // sort keys. Для диплома OK; в production — использовать offset-pagination
+  // для sort=popular или добавить secondary stable sort key (publishedAt + id).
+  async listPublished(
+    limit = 20,
+    sort: 'popular' | 'latest' = 'latest',
+    cursor?: string,
+  ) {
+    const take = Number(limit) + 1; // fetch one extra to detect next page
     const orderBy =
       sort === 'popular'
         ? [{ likesCount: 'desc' as const }, { publishedAt: 'desc' as const }]
         : [{ publishedAt: 'desc' as const }];
 
-    const [items, total] = await Promise.all([
-      this.prisma.news.findMany({
-        where: { status: NewsStatus.PUBLISHED },
-        orderBy,
-        take: Number(limit),
-        skip: Number(offset),
-        select: {
-          id: true,
-          titleRu: true,
-          titleKk: true,
-          imageUrl: true,
-          publishedAt: true,
-          authorId: true,
-          likesCount: true,
-          commentsCount: true,
-        },
-      }),
-      this.prisma.news.count({ where: { status: NewsStatus.PUBLISHED } }),
-    ]);
-    return { items, total };
+    const items = await this.prisma.news.findMany({
+      where: { status: NewsStatus.PUBLISHED },
+      orderBy,
+      take,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      select: {
+        id: true,
+        titleRu: true,
+        titleKk: true,
+        imageUrl: true,
+        publishedAt: true,
+        authorId: true,
+        likesCount: true,
+        commentsCount: true,
+      },
+    });
+    return buildCursorPage(items as any[], Number(limit));
   }
 
   // ── Полная карточка (только PUBLISHED) ───────────────────────────────────
   async getById(id: string) {
-    const news = await this.prisma.news.findUnique({ where: { id } });
+    const news = await this.prisma.news.findUnique({
+      where: { id },
+      include: {
+        author: {
+          select: {
+            id: true,
+            profile: {
+              select: {
+                firstName: true,
+                lastName:  true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
     if (!news || news.status !== NewsStatus.PUBLISHED) {
       throw new NotFoundException('Новость не найдена');
     }
@@ -55,13 +87,14 @@ export class NewsService {
   }
 
   // ── Создать новость ───────────────────────────────────────────────────────
+  // Sanitize HTML bodies before saving to prevent XSS when rendered in frontend
   async create(dto: CreateNewsDto, authorId: string) {
     return this.prisma.news.create({
       data: {
         titleRu:  dto.titleRu,
         titleKk:  dto.titleKk  ?? null,
-        bodyRu:   dto.bodyRu,
-        bodyKk:   dto.bodyKk   ?? null,
+        bodyRu:   DOMPurify.sanitize(dto.bodyRu),
+        bodyKk:   dto.bodyKk ? DOMPurify.sanitize(dto.bodyKk) : null,
         imageUrl: dto.imageUrl ?? null,
         authorId,
         status: NewsStatus.PENDING,
@@ -69,15 +102,15 @@ export class NewsService {
     });
   }
 
-  // ── Загрузить фото к новости ──────────────────────────────────────────────
-  async updateImage(newsId: string, userId: string, filename: string) {
+  // ── Загрузить фото к новости (URL из MinIO) ──────────────────────────────
+  async updateImage(newsId: string, userId: string, imageUrl: string) {
     const news = await this.prisma.news.findUnique({ where: { id: newsId } });
     if (!news) throw new NotFoundException('Новость не найдена');
     if (news.authorId !== userId) throw new ForbiddenException('Нет прав');
 
     return this.prisma.news.update({
       where: { id: newsId },
-      data: { imageUrl: `/uploads/news/${filename}` },
+      data: { imageUrl },
     });
   }
 
@@ -121,7 +154,7 @@ export class NewsService {
       throw new ForbiddenException('Новость уже прошла модерацию');
     }
 
-    return this.prisma.news.update({
+    const updated = await this.prisma.news.update({
       where: { id },
       data: {
         status:       dto.status,
@@ -129,6 +162,17 @@ export class NewsService {
         publishedAt:  dto.status === NewsStatus.PUBLISHED ? new Date() : null,
       },
     });
+
+    // Push-уведомление всем пользователям при публикации новости
+    if (dto.status === NewsStatus.PUBLISHED) {
+      this.fcm.broadcastToAll({
+        title: '📰 Новая новость',
+        body:  updated.titleRu,
+        data:  { newsId: updated.id, type: 'news_published' },
+      }).catch(() => {/* ignore push errors */});
+    }
+
+    return updated;
   }
 
   // ── Удалить новость ───────────────────────────────────────────────────────

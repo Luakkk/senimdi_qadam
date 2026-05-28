@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { OrgCategory, OrgStatus, Role } from '@prisma/client';
@@ -56,8 +56,9 @@ export class AdminOrganizationsController {
 
   @Patch(':id/verify')
   @ApiOperation({ summary: 'Изменить статус верификации' })
-  verify(@Param('id') id: string, @Body() dto: VerifyOrganizationDto) {
-    return this.svc.verify(id, dto);
+  verify(@Param('id') id: string, @Body() dto: VerifyOrganizationDto, @Req() req: any) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] ?? req.ip;
+    return this.svc.verify(id, dto, req.user?.sub, ip);
   }
 
   @Delete(':id')

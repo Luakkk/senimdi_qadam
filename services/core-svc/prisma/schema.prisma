@@ -8,7 +8,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -63,15 +62,17 @@ enum ComplaintStatus {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String?
-  role         Role     @default(USER)
-  isVerified   Boolean  @default(false)
-  isActive     Boolean  @default(true)
-  googleId     String?  @unique
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String   @id @default(uuid())
+  email           String   @unique
+  passwordHash    String?
+  role            Role     @default(USER)
+  isVerified      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  googleId        String?  @unique
+  totpSecret      String?  // TOTP secret (base32) — null = 2FA not set up
+  isTotpEnabled   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   profile          UserProfile?
   asGuardian       RelativeLink[]      @relation("GuardianLinks")
@@ -82,26 +83,33 @@ model User {
   complaints       Complaint[]
   verificationLogs VerificationLog[]
   news             News[]
+  guides           Guide[]             @relation("AuthoredGuides")
   reviewsWritten   SpecialistReview[]  @relation("ReviewsWritten")
   reviewsReceived  SpecialistReview[]  @relation("ReviewsReceived")
+  deviceTokens     DeviceToken[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]     @relation("AuditActor")
 }
 
 model UserProfile {
   id             String          @id @default(uuid())
   userId         String          @unique
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName      String
-  lastName       String
+  // Nullable: OAuth-пользователи могут не иметь имени до заполнения профиля.
+  // Миграция 20260527000002 делает ALTER COLUMN ... DROP NOT NULL.
+  firstName      String?
+  lastName       String?
   phone          String?
   birthDate      DateTime?
   city           String?
   disabilityType DisabilityType?
   disabilityNote String?
-  avatarUrl      String?
-  lat            Float?          // геолокация пользователя
-  lon            Float?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  avatarUrl           String?
+  lat                 Float?          // геолокация пользователя
+  lon                 Float?
+  accessibilityPrefs  Json?           // {"fontSize":"large","contrast":"high","tts":true,...}
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 }
 
 model RelativeLink {
@@ -144,6 +152,7 @@ model Organization {
   verificationLogs VerificationLog[]
   savedBy          SavedOrganization[]
   reviews          OrgReview[]
+  services         OrgService[]
   ratingAvg        Float?   // средний рейтинг (обновляется при каждом отзыве)
   ratingCount      Int      @default(0) // кол-во отзывов
 
@@ -172,7 +181,10 @@ model VerificationLog {
   organization   Organization @relation(fields: [organizationId], references: [id])
   moderatorId    String?
   moderator      User?        @relation(fields: [moderatorId], references: [id])
-  status         OrgStatus
+  status         OrgStatus    // итоговый статус (= statusTo)
+  statusFrom     OrgStatus?   // статус ДО действия
+  statusTo       OrgStatus?   // статус ПОСЛЕ действия
+  method         String?      // "manual" | "auto" | "appeal"
   comment        String?
   createdAt      DateTime     @default(now())
 }
@@ -343,6 +355,7 @@ model Guide {
   tags        String[]
   isPublished Boolean  @default(false)
   authorId    String?
+  author      User?    @relation("AuthoredGuides", fields: [authorId], references: [id], onDelete: SetNull)
   likesCount  Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -353,6 +366,60 @@ model Guide {
   @@index([isPublished])
   @@index([category])
   @@index([likesCount])
+}
+
+// ───────────────────────────────────────────────────
+// FCM DEVICE TOKENS (push-уведомления)
+// ───────────────────────────────────────────────────
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique   // FCM registration token
+  platform  String            // "android" | "ios" | "web"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// ───────────────────────────────────────────────────
+// УСЛУГИ ОРГАНИЗАЦИИ (ORG_MANAGER управляет)
+// ───────────────────────────────────────────────────
+
+model OrgService {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  nameRu         String
+  nameKk         String?
+  descriptionRu  String?
+  isActive       Boolean      @default(true)
+  price          Float?       // цена услуги (0 = бесплатно)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+}
+
+// ───────────────────────────────────────────────────
+// IN-APP УВЕДОМЛЕНИЯ (история push-уведомлений)
+// ───────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   // получатель (null = broadcast)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  type      String   // "news_published" | "booking_confirmed" | "org_verified" | ...
+  data      Json?    // произвольные данные (bookingId, newsId и т.д.)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, isRead])
 }
 
 // ───────────────────────────────────────────────────
@@ -369,4 +436,25 @@ model GuideLike {
   @@unique([guideId, userId])
   @@index([guideId])
   @@index([userId])
+}
+
+// ───────────────────────────────────────────────────
+// AUDIT LOG (история действий администратора)
+// ───────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String   // userId администратора / модератора
+  actor      User     @relation("AuditActor", fields: [actorId], references: [id])
+  action     String   // "ORG_VERIFIED" | "USER_BANNED" | "NEWS_DELETED" | ...
+  targetType String   // "Organization" | "User" | "News" | "Complaint" | ...
+  targetId   String   // id затронутого ресурса
+  metadata   Json?    // { before: {...}, after: {...}, reason: "..." }
+  ip         String?  // IP адрес администратора
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+  @@index([action])
 }
