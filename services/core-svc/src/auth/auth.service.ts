@@ -14,6 +14,7 @@ import * as bcrypt from 'bcryptjs';
 import * as speakeasy from 'speakeasy';
 import { randomUUID } from 'crypto';
 import { Resend } from 'resend';
+import { encrypt, decrypt, isEncrypted } from './crypto.helper';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -97,8 +98,12 @@ export class AuthService {
         // Signal to the client that TOTP is required (don't issue tokens yet)
         return { requiresTwoFactor: true };
       }
+      // Decrypt TOTP secret (stored AES-256-GCM encrypted)
+      const plainSecret = isEncrypted(user.totpSecret)
+        ? decrypt(user.totpSecret)
+        : user.totpSecret; // legacy plaintext fallback (re-encrypt on next write)
       const valid2fa = speakeasy.totp.verify({
-        secret:   user.totpSecret,
+        secret:   plainSecret,
         encoding: 'base32',
         token:    dto.totpCode,
         window:   1, // allow 30s clock skew
@@ -314,10 +319,13 @@ export class AuthService {
       length: 32,
     });
 
-    // Save the secret in a pending state (not enabled until verified)
+    // Encrypt the secret before storing (AES-256-GCM, key from ENCRYPTION_KEY env)
+    const encryptedSecret = encrypt(secret.base32);
+
+    // Save the encrypted secret in a pending state (not enabled until verified)
     await this.prisma.user.update({
       where: { id: userId },
-      data:  { totpSecret: secret.base32 },
+      data:  { totpSecret: encryptedSecret },
     });
 
     return {
@@ -338,8 +346,13 @@ export class AuthService {
       throw new BadRequestException('2FA уже активирован');
     }
 
+    // Decrypt before verify (stored AES-256-GCM encrypted)
+    const plainSecret2 = isEncrypted(user.totpSecret)
+      ? decrypt(user.totpSecret)
+      : user.totpSecret;
+
     const valid = speakeasy.totp.verify({
-      secret:   user.totpSecret,
+      secret:   plainSecret2,
       encoding: 'base32',
       token,
       window:   1,
@@ -365,8 +378,13 @@ export class AuthService {
       throw new BadRequestException('2FA не активирован');
     }
 
+    // Decrypt before verify (stored AES-256-GCM encrypted)
+    const plainSecret3 = isEncrypted(user.totpSecret)
+      ? decrypt(user.totpSecret)
+      : user.totpSecret;
+
     const valid = speakeasy.totp.verify({
-      secret:   user.totpSecret,
+      secret:   plainSecret3,
       encoding: 'base32',
       token,
       window:   1,

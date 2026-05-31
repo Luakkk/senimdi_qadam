@@ -21,5 +21,8 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # SENTRY_DSN / ENV и прочие ключи .env читаются напрямую через os.getenv,
+        # поэтому лишние переменные окружения игнорируем, а не падаем.
+        extra = "ignore"
 
 settings = Settings()

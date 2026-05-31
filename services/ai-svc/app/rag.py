@@ -57,17 +57,67 @@ def rag_answer(question: str, db: Session, top_k: int = 5) -> dict:
         "sources": [{"source": r.source, "similarity": round(r.similarity, 3)} for r in results],
     }
 
+def _split_into_chunks(content: str, max_chars: int = 600, overlap_chars: int = 80) -> list[str]:
+    """
+    Paragraph-aware chunker.
+
+    Strategy:
+      1. Split by blank lines (paragraph boundaries) — keeps sentences intact.
+      2. If a paragraph exceeds max_chars, sub-split on sentence boundaries (. ! ?).
+      3. Accumulate paragraphs into a chunk until max_chars is reached, then start
+         a new chunk with the last paragraph repeated as overlap context.
+
+    This avoids cutting mid-sentence which degrades embedding quality.
+    """
+    import re
+
+    # Step 1: Split into natural paragraphs (2+ newlines or section breaks)
+    raw_paragraphs = re.split(r'\n{2,}', content.strip())
+
+    sentences: list[str] = []
+    for para in raw_paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if len(para) <= max_chars:
+            sentences.append(para)
+        else:
+            # Sub-split long paragraphs on sentence endings
+            parts = re.split(r'(?<=[.!?])\s+', para)
+            sentences.extend(p.strip() for p in parts if p.strip())
+
+    # Step 2: Accumulate sentences into chunks with overlap
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for sent in sentences:
+        sent_len = len(sent)
+        if current_len + sent_len > max_chars and current:
+            chunks.append(' '.join(current))
+            # Overlap: keep the last sentence(s) up to overlap_chars
+            overlap_buf: list[str] = []
+            overlap_len = 0
+            for s in reversed(current):
+                if overlap_len + len(s) > overlap_chars:
+                    break
+                overlap_buf.insert(0, s)
+                overlap_len += len(s)
+            current = overlap_buf
+            current_len = overlap_len
+        current.append(sent)
+        current_len += sent_len
+
+    if current:
+        chunks.append(' '.join(current))
+
+    return [c for c in chunks if c.strip()]
+
+
 def ingest_document(content: str, source: str, category: str, db: Session, language: str = "ru"):
     """Добавить документ в базу знаний (с векторизацией)"""
-    # Разбиваем на чанки по 500 символов с перекрытием 50
-    chunk_size = 500
-    overlap = 50
-    chunks = []
-
-    for i in range(0, len(content), chunk_size - overlap):
-        chunk = content[i:i + chunk_size]
-        if chunk.strip():
-            chunks.append(chunk)
+    # Paragraph-aware splitting — сохраняет границы предложений
+    chunks = _split_into_chunks(content)
 
     for chunk_text in chunks:
         embedding = get_embedding(chunk_text)

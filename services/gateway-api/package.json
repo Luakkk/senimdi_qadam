@@ -9,7 +9,10 @@
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate --schema=prisma/core/schema.prisma && prisma generate --schema=prisma/taxi/schema.prisma",
     "prisma:migrate:core": "prisma migrate deploy --config=prisma/core/prisma.config.ts",
-    "prisma:migrate:taxi": "prisma migrate deploy --config=prisma/taxi/prisma.config.ts"
+    "prisma:migrate:taxi": "prisma migrate deploy --config=prisma/taxi/prisma.config.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:cov": "jest --coverage"
   },
   "dependencies": {
     "@sentry/node": "^8.0.0",
@@ -46,13 +49,36 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "^11.0.1",
     "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/passport-jwt": "^4.0.1",
+    "jest": "^30.0.0",
     "prisma": "^5.22.0",
+    "ts-jest": "^29.2.5",
     "ts-loader": "^9.5.7",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3"
+  },
+  "jest": {
+    "moduleFileExtensions": ["js", "json", "ts"],
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.(t|j)s$": ["ts-jest", { "isolatedModules": true }]
+    },
+    "collectCoverageFrom": ["**/*.(t|j)s"],
+    "coverageDirectory": "../coverage",
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^rxjs/operators$": "<rootDir>/../node_modules/rxjs/dist/cjs/operators/index.js",
+      "^rxjs/ajax$": "<rootDir>/../node_modules/rxjs/dist/cjs/ajax/index.js",
+      "^rxjs/fetch$": "<rootDir>/../node_modules/rxjs/dist/cjs/fetch/index.js",
+      "^rxjs/testing$": "<rootDir>/../node_modules/rxjs/dist/cjs/testing/index.js",
+      "^rxjs/webSocket$": "<rootDir>/../node_modules/rxjs/dist/cjs/webSocket/index.js",
+      "^rxjs$": "<rootDir>/../node_modules/rxjs/dist/cjs/index.js"
+    }
   }
 }

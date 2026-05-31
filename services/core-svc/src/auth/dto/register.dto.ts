@@ -3,6 +3,7 @@ import {
   IsEmail,
   IsString,
   MinLength,
+  MaxLength,
   IsOptional,
   IsEnum,
   Matches,
@@ -16,7 +17,8 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'StrongPass123!' })
   @IsString()
-  @MinLength(8, { message: 'Пароль минимум 8 символов' })
+  @MinLength(8,   { message: 'Пароль минимум 8 символов' })
+  @MaxLength(128, { message: 'Пароль не может быть длиннее 128 символов' })
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
     message: 'Пароль должен содержать заглавную букву, строчную и цифру',
   })

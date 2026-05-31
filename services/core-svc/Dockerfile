@@ -2,9 +2,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-# npm install вместо npm ci — lock-файл мог устареть после добавления пакетов.
-# При следующем локальном запуске обнови: cd services/core-svc && npm install
-RUN npm install --legacy-peer-deps
+# npm ci гарантирует точные версии из package-lock.json (детерминированный build)
+RUN npm ci --legacy-peer-deps
 
 ARG CACHEBUST=1
 RUN echo "cache-bust: $CACHEBUST"
@@ -17,7 +16,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install --legacy-peer-deps --omit=dev
+RUN npm ci --legacy-peer-deps --omit=dev
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma

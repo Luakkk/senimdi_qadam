@@ -9,7 +9,9 @@
 import {
   Controller,
   Patch,
+  Post,
   Param,
+  Body,
   Headers,
   Req,
   UnauthorizedException,
@@ -19,6 +21,7 @@ import {
 import { ApiExcludeController } from '@nestjs/swagger';
 import { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { Role } from '@prisma/client';
 
 /**
@@ -45,7 +48,10 @@ function isInternalIp(ip: string): boolean {
 @ApiExcludeController()
 @Controller('internal')
 export class InternalController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * PATCH /internal/users/:id/promote-taxi-manager
@@ -78,5 +84,68 @@ export class InternalController {
     });
 
     return { success: true, userId, role: Role.TAXI_MANAGER };
+  }
+
+  /**
+   * POST /internal/notifications/user/:id
+   * Creates a notification for a specific user.
+   * Called by taxi-svc (booking confirmed, driver assigned, etc.)
+   */
+  @Post('notifications/user/:id')
+  async notifyUser(
+    @Param('id') userId: string,
+    @Body() body: { title: string; body: string; type: string; data?: Record<string, unknown> },
+    @Headers('x-internal-key') key: string,
+    @Req() req: Request,
+  ) {
+    const clientIp = (req.ip || req.socket?.remoteAddress || '');
+    if (!isInternalIp(clientIp)) {
+      throw new ForbiddenException(`Access denied from external IP: ${clientIp}`);
+    }
+    if (!key || key !== process.env.ADMIN_KEY) {
+      throw new UnauthorizedException('Invalid internal key');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const notification = await this.notifications.createForUser({
+      userId,
+      title: body.title,
+      body:  body.body,
+      type:  body.type,
+      data:  body.data,
+    });
+
+    return { success: true, notificationId: notification.id };
+  }
+
+  /**
+   * POST /internal/notifications/broadcast
+   * Creates a broadcast notification visible to ALL users (userId = null).
+   * Use for system-wide announcements, maintenance alerts, new feature releases.
+   */
+  @Post('notifications/broadcast')
+  async broadcastNotification(
+    @Body() body: { title: string; body: string; type: string; data?: Record<string, unknown> },
+    @Headers('x-internal-key') key: string,
+    @Req() req: Request,
+  ) {
+    const clientIp = (req.ip || req.socket?.remoteAddress || '');
+    if (!isInternalIp(clientIp)) {
+      throw new ForbiddenException(`Access denied from external IP: ${clientIp}`);
+    }
+    if (!key || key !== process.env.ADMIN_KEY) {
+      throw new UnauthorizedException('Invalid internal key');
+    }
+
+    const notification = await this.notifications.createBroadcast({
+      title: body.title,
+      body:  body.body,
+      type:  body.type,
+      data:  body.data,
+    });
+
+    return { success: true, notificationId: notification.id, broadcast: true };
   }
 }

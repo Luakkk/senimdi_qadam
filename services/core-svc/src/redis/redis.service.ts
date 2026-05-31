@@ -58,6 +58,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.del(`refresh:${userId}`);
   }
 
+  // ── Служебные ─────────────────────────────────────────────────────────────
+  /** PING → 'PONG'. Используется health-check контроллером. */
+  async ping(): Promise<string> {
+    return this.client.ping();
+  }
+
   // ── Общие методы (для кэша профилей и т.д.) ──────────────────────────────
   async get(key: string): Promise<string | null> {
     return this.client.get(key);

@@ -144,6 +144,8 @@ services:
       MINIO_ACCESS_KEY:       ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY:       ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_PUBLIC_URL:       ${MINIO_PUBLIC_URL:-http://localhost:9000}
+      # ── AES-256-GCM (TOTP secrets) ──────────────────────────────────────────
+      ENCRYPTION_KEY:         ${ENCRYPTION_KEY}
       # ── Sentry ──────────────────────────────────────────────────────────────
       SENTRY_DSN:             ${SENTRY_DSN:-}
       NODE_ENV:               ${NODE_ENV:-production}

@@ -1,0 +1,23 @@
+# Изолированная тестовая инфраструктура для E2E core-svc.
+# Поднимает Postgres (5433) и Redis (6380) на НЕконфликтующих портах,
+# чтобы не задеть твою рабочую БД/redis на 5432/6379.
+#   docker compose -f docker-compose.test.yml up -d
+services:
+  core-test-db:
+    image: postgres:16-alpine
+    container_name: core-test-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: core_db_test
+    ports:
+      - "5433:5432"
+    # tmpfs — данные живут в памяти, после остановки контейнера всё чисто
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  core-test-redis:
+    image: redis:7-alpine
+    container_name: core-test-redis
+    ports:
+      - "6380:6379"

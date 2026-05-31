@@ -43,6 +43,8 @@ services:
     restart: always
     mem_limit: 512m
     cpus: "0.5"
+    # Never expose DB ports to host in production
+    ports: !reset []
     logging:
       driver: json-file
       options:
@@ -53,6 +55,8 @@ services:
     restart: always
     mem_limit: 512m
     cpus: "0.5"
+    # Never expose DB ports to host in production
+    ports: !reset []
     logging:
       driver: json-file
       options:
@@ -63,6 +67,8 @@ services:
     restart: always
     mem_limit: 1g
     cpus: "1.0"
+    # Never expose DB ports to host in production
+    ports: !reset []
     logging:
       driver: json-file
       options:
@@ -91,6 +97,8 @@ services:
     restart: always
     mem_limit: 512m
     cpus: "0.5"
+    # In production MinIO is accessed only via internal network (gateway proxies it)
+    ports: !reset []
     logging:
       driver: json-file
       options:
@@ -160,3 +168,37 @@ services:
       options:
         max-size: "50m"
         max-file: "10"
+
+  # ─── Monitoring — порты закрыты, доступ только через SSH tunnel ────────────
+  #
+  # В продакшене Prometheus и Grafana НЕ должны быть доступны с интернета.
+  # Доступ к дашбордам: ssh -L 9090:localhost:9090 -L 3010:localhost:3010 user@server
+  # Тогда http://localhost:9090 и http://localhost:3010 откроются локально.
+  #
+  prometheus:
+    restart: always
+    mem_limit: 256m
+    cpus: "0.25"
+    # Скрываем порт — только через SSH tunnel в prod
+    ports: !reset []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grafana:
+    restart: always
+    mem_limit: 256m
+    cpus: "0.25"
+    # Скрываем порт — только через SSH tunnel в prod
+    ports: !reset []
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

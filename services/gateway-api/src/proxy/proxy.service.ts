@@ -41,6 +41,11 @@ export class ProxyService {
       forwardHeaders['content-type'] = 'application/json';
     }
 
+    // STT/TTS маршруты требуют больше времени (загрузка аудио + инференс модели).
+    // Все остальные запросы — стандартный таймаут 30 секунд.
+    const isSpeechRoute = fullPath.startsWith('/speech/') || fullPath.startsWith('/stt') || fullPath.startsWith('/tts');
+    const timeoutMs = isSpeechRoute ? 120_000 : 30_000;
+
     const response = await firstValueFrom(
       this.http.request({
         url,
@@ -50,6 +55,8 @@ export class ProxyService {
         // validateStatus: всегда true — не выбрасываем ошибку на 4xx/5xx,
         // пробрасываем статус как есть на фронтенд
         validateStatus: () => true,
+        // Таймаут: защита от зависания gateway при недоступном upstream
+        timeout: timeoutMs,
       }),
     );
 

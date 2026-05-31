@@ -181,6 +181,15 @@ export class BookingsService {
   }
 
   // ── Создать платёжную транзакцию (Kaspi / наличные) ──────────────────────
+  //
+  // ⚠️  MOCK IMPLEMENTATION (Дипломный проект)
+  //    CASH:  сразу помечается PAID — реальная логика.
+  //    KASPI: генерируется заглушка-ссылка.
+  //           Production-интеграция требует подключения к Kaspi Pay API:
+  //           https://pay.kaspi.kz/pay/integration — подписанный webhook
+  //           для подтверждения платежа (HMAC-SHA256 верификация).
+  //    CARD:  аналогично — требует Stripe/PayBox/CloudPayments интеграцию.
+  //
   async initiatePayment(
     userId: string,
     bookingId: string,
@@ -190,14 +199,31 @@ export class BookingsService {
       where: { id: bookingId, userId },
     });
     if (!booking) throw new NotFoundException('Заявка не найдена');
+
+    // Нельзя оплатить отменённую или уже завершённую поездку
+    if (
+      booking.status === BookingStatus.CANCELLED ||
+      booking.status === BookingStatus.COMPLETED
+    ) {
+      throw new BadRequestException(
+        `Нельзя оплатить заявку со статусом ${booking.status}`,
+      );
+    }
+
     if (booking.paymentStatus === PaymentStatus.PAID) {
       throw new BadRequestException('Заявка уже оплачена');
     }
 
     const amount = booking.estimatedPrice ?? BASE_FARE;
 
-    // For CASH — mark immediately; for KASPI — generate mock QR link
+    // CASH — подтверждается сразу (водитель получает наличными).
+    // KASPI/CARD — переводятся в PENDING, требуют подтверждения через webhook.
     const isInstant = method === PaymentMethod.CASH;
+
+    // MOCK: для KASPI генерируем заглушку-ссылку.
+    // В production заменить на реальный Kaspi Pay API вызов:
+    //   POST https://kaspi.kz/online/api/operations — получить paymentUrl из ответа.
+    const mockKaspiUrl = `https://pay.kaspi.kz/pay?amount=${amount}&order=${bookingId}&MOCK=true`;
 
     const tx = await this.prisma.paymentTransaction.create({
       data: {
@@ -206,9 +232,9 @@ export class BookingsService {
         amount,
         method,
         status:      isInstant ? PaymentStatus.PAID : PaymentStatus.PENDING,
-        externalId:  isInstant ? null : `KASPI-${Date.now()}`,
-        externalUrl: isInstant ? null
-          : `https://pay.kaspi.kz/pay?amount=${amount}&order=${bookingId}`,
+        externalId:  isInstant ? null : `MOCK-KASPI-${Date.now()}`,
+        externalUrl: isInstant ? null : mockKaspiUrl,
+        metadata:    isInstant ? null : { mock: true, note: 'Replace with real Kaspi Pay API in production' },
       },
     });
 
@@ -227,13 +253,21 @@ export class BookingsService {
       amount,
       method,
       paymentUrl:    tx.externalUrl ?? null,
+      isMock:        !isInstant, // явно сигнализируем фронту что это заглушка
       message:       isInstant
         ? 'Оплата наличными подтверждена'
-        : 'Перейдите по ссылке для оплаты через Kaspi',
+        : '[MOCK] Тестовая ссылка Kaspi. В production требуется реальная интеграция с Kaspi Pay API.',
     };
   }
 
-  // ── Подтверждение оплаты (webhook / ручное) ───────────────────────────────
+  // ── Подтверждение оплаты (webhook) ────────────────────────────────────────
+  //
+  // ⚠️  MOCK: принимает любые параметры без верификации подписи.
+  //    Production-реализация должна:
+  //    1. Проверить HMAC-SHA256 подпись от Kaspi Pay в заголовке X-Kaspi-Signature.
+  //    2. Сверить сумму и orderId с данными в БД (защита от подмены суммы).
+  //    3. Ответить 200 OK только после успешной проверки.
+  //
   async confirmPayment(bookingId: string, transactionId: string) {
     const tx = await this.prisma.paymentTransaction.findFirst({
       where: { id: transactionId, bookingId },

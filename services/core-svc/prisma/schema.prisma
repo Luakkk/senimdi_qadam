@@ -409,8 +409,8 @@ model OrgService {
 
 model Notification {
   id        String   @id @default(uuid())
-  userId    String   // получатель (null = broadcast)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String?  // null = broadcast (рассылка всем пользователям)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String
   body      String
   type      String   // "news_published" | "booking_confirmed" | "org_verified" | ...

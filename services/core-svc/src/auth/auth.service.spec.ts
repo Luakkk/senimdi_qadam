@@ -16,8 +16,11 @@ const mockPrisma = {
   },
 };
 
+// AuthService вызывает jwt.sign (синхронный), не signAsync.
+// Исправлен mock: sign возвращает строку синхронно через mockReturnValue.
 const mockJwt = {
-  signAsync: jest.fn().mockResolvedValue('mock-token'),
+  sign:   jest.fn().mockReturnValue('mock-access-token'),
+  verify: jest.fn(),
 };
 
 const mockConfig = {
@@ -38,6 +41,7 @@ const mockRedis = {
   setRefreshToken:        jest.fn().mockResolvedValue(undefined),
   getAndDeleteRefreshToken: jest.fn(),
   deleteRefreshToken:     jest.fn().mockResolvedValue(undefined),
+  del:                    jest.fn().mockResolvedValue(undefined),
   setResetCode:           jest.fn().mockResolvedValue(undefined),
   getAndDeleteResetCode:  jest.fn(),
   setVerificationToken:   jest.fn().mockResolvedValue(undefined),
@@ -90,6 +94,8 @@ describe('AuthService', () => {
 
       expect(result).toHaveProperty('accessToken');
       expect(result).toHaveProperty('refreshToken');
+      // Проверяем что jwt.sign реально вызван (не signAsync!)
+      expect(mockJwt.sign).toHaveBeenCalledTimes(2); // access + refresh
       expect(mockPrisma.user.create).toHaveBeenCalledTimes(1);
     });
   });
@@ -111,11 +117,35 @@ describe('AuthService', () => {
     it('should return tokens on successful login', async () => {
       const hash = await bcrypt.hash('correct', 12);
       mockPrisma.user.findUnique.mockResolvedValue({
-        id: 'uid', email: 'x@x.kz', passwordHash: hash, isActive: true, role: 'USER', isVerified: true,
+        id: 'uid', email: 'x@x.kz', passwordHash: hash,
+        isActive: true, role: 'USER', isVerified: true,
+        isTotpEnabled: false, totpSecret: null,
       });
 
       const result = await service.login({ email: 'x@x.kz', password: 'correct' });
       expect(result).toHaveProperty('accessToken');
+      expect(mockJwt.sign).toHaveBeenCalledTimes(2);
+    });
+
+    it('should throw UnauthorizedException if account is blocked', async () => {
+      const hash = await bcrypt.hash('correct', 12);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'uid', email: 'x@x.kz', passwordHash: hash, isActive: false, isVerified: true,
+      });
+      await expect(service.login({ email: 'x@x.kz', password: 'correct' })).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should return requiresTwoFactor if 2FA enabled and no code provided', async () => {
+      const hash = await bcrypt.hash('correct', 12);
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'uid', email: 'x@x.kz', passwordHash: hash,
+        isActive: true, role: 'USER', isVerified: true,
+        isTotpEnabled: true,
+        totpSecret: 'plain-secret', // legacy plaintext — isEncrypted() returns false
+      });
+
+      const result = await service.login({ email: 'x@x.kz', password: 'correct' });
+      expect(result).toEqual({ requiresTwoFactor: true });
     });
   });
 

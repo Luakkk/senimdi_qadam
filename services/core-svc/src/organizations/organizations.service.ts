@@ -117,20 +117,29 @@ export class OrganizationsService {
     if (q.category) where.category  = q.category;
     if (q.city)     where.city      = q.city;
 
-    const result = await this.prisma.organization.findMany({
-      where,
-      take: q.limit ?? 50,
-      skip: q.offset ?? 0,
-      orderBy: { updatedAt: 'desc' },
-    });
+    const limit  = q.limit  ?? 50;
+    const offset = q.offset ?? 0;
+
+    // Запрашиваем items и total параллельно — один лишний COUNT экономит RTT
+    const [items, total] = await Promise.all([
+      this.prisma.organization.findMany({
+        where,
+        take:    limit,
+        skip:    offset,
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.prisma.organization.count({ where }),
+    ]);
+
+    const response = { items, total, limit, offset };
 
     if (useCache) {
       try {
-        await this.redis.set(this.orgListKey(q), JSON.stringify(result), ORG_LIST_TTL);
+        await this.redis.set(this.orgListKey(q), JSON.stringify(response), ORG_LIST_TTL);
       } catch { /* некритично */ }
     }
 
-    return result;
+    return response;
   }
 
   async getById(id: string) {
@@ -152,60 +161,94 @@ export class OrganizationsService {
   }
 
   // ── Полнотекстовый поиск для AI-ассистента ───────────────────────────────
-  // Ищем по nameRu, description и address. Возвращаем lat/lon для расстояния.
-  // Этот endpoint вызывает ai-svc через HTTP — НЕ напрямую к БД.
+  // Использует pg_trgm GIN индекс (создан в migration 20260527000001).
+  // Оператор % — trigram similarity >= threshold (default 0.3).
+  // Сортировка по similarity(nameRu, query) DESC, затем по ratingAvg.
+  // Prisma LIKE через contains НЕ использует GIN индекс — только $queryRaw.
   async search(params: { query: string; category?: string; limit?: number }) {
     const { query, category, limit = 10 } = params;
 
-    const textConditions: any[] = [
-      { nameRu:       { contains: query, mode: 'insensitive' } },
-      { description:  { contains: query, mode: 'insensitive' } },
-      { address:      { contains: query, mode: 'insensitive' } },
-    ];
-
-    // Только VERIFIED — непроверенные организации не показываем пользователям
-    const where: any = {
-      status: OrgStatus.VERIFIED,
+    type OrgRow = {
+      nameRu: string;
+      category: string;
+      address: string | null;
+      city: string;
+      phone: string | null;
+      website: string | null;
+      description: string | null;
+      ratingAvg: number;
+      ratingCount: number;
+      lat: number | null;
+      lon: number | null;
     };
 
-    if (category) {
-      // При указании категории: совпадение по категории ИЛИ по тексту
-      where.OR = [{ category }, ...textConditions];
-    } else {
-      where.OR = textConditions;
-    }
+    // pg_trgm: % оператор проверяет similarity >= pg_trgm.similarity_threshold (0.3)
+    // ILIKE '%query%' — дополнительный fallback для коротких (< 3 символов) строк.
+    // Два варианта запроса: с фильтром по категории и без.
+    const ilike = `%${query}%`;
+    const orgs = category
+      ? await this.prisma.$queryRaw<OrgRow[]>`
+          SELECT
+            "nameRu", category::text AS category, address, city,
+            phone, website, description,
+            "ratingAvg", "ratingCount", lat, lon
+          FROM "Organization"
+          WHERE status = 'VERIFIED'
+            AND (
+              "nameRu"    % ${query}
+              OR "nameKk"    % ${query}
+              OR description % ${query}
+              OR address     % ${query}
+              OR "nameRu"    ILIKE ${ilike}
+              OR "nameKk"    ILIKE ${ilike}
+              OR description ILIKE ${ilike}
+              OR category::text = ${category}
+            )
+          ORDER BY
+            GREATEST(
+              similarity("nameRu", ${query}),
+              COALESCE(similarity("nameKk", ${query}), 0)
+            ) DESC,
+            "ratingAvg" DESC
+          LIMIT ${limit}
+        `
+      : await this.prisma.$queryRaw<OrgRow[]>`
+          SELECT
+            "nameRu", category::text AS category, address, city,
+            phone, website, description,
+            "ratingAvg", "ratingCount", lat, lon
+          FROM "Organization"
+          WHERE status = 'VERIFIED'
+            AND (
+              "nameRu"    % ${query}
+              OR "nameKk"    % ${query}
+              OR description % ${query}
+              OR address     % ${query}
+              OR "nameRu"    ILIKE ${ilike}
+              OR "nameKk"    ILIKE ${ilike}
+              OR description ILIKE ${ilike}
+            )
+          ORDER BY
+            GREATEST(
+              similarity("nameRu", ${query}),
+              COALESCE(similarity("nameKk", ${query}), 0)
+            ) DESC,
+            "ratingAvg" DESC
+          LIMIT ${limit}
+        `;
 
-    const orgs = await this.prisma.organization.findMany({
-      where,
-      select: {
-        nameRu:       true,
-        category:     true,
-        address:      true,
-        city:         true,
-        phone:        true,
-        website:      true,
-        description:  true,
-        ratingAvg:    true,
-        ratingCount:  true,
-        lat:          true,
-        lon:          true,
-      },
-      orderBy: { ratingAvg: 'desc' },
-      take: limit,
-    });
-
-    // Fallback: если ничего не нашли — вернём топ-5 верифицированных по рейтингу
+    // Fallback: если pg_trgm ничего не нашёл — топ-5 по рейтингу
     if (orgs.length === 0) {
-      return this.prisma.organization.findMany({
-        where: { status: OrgStatus.VERIFIED },
-        select: {
-          nameRu: true, category: true, address: true, city: true,
-          phone: true, website: true, description: true,
-          ratingAvg: true, ratingCount: true, lat: true, lon: true,
-        },
-        orderBy: { ratingAvg: 'desc' },
-        take: 5,
-      });
+      return this.prisma.$queryRaw<OrgRow[]>`
+        SELECT
+          "nameRu", category::text AS category, address, city,
+          phone, website, description,
+          "ratingAvg", "ratingCount", lat, lon
+        FROM "Organization"
+        WHERE status = 'VERIFIED'
+        ORDER BY "ratingAvg" DESC
+        LIMIT 5
+      `;
     }
 
     return orgs;
