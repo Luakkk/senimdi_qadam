@@ -75,6 +75,17 @@ export class OrganizationsController {
     });
   }
 
+  // ВАЖНО: статичный роут 'mine' должен идти ДО ':id',
+  // иначе Nest сопоставит '/organizations/mine' с параметром :id и вернёт 404.
+  @Get('mine')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORG_MANAGER)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: '[ORG_MANAGER] Моя организация' })
+  getMine(@Request() req: any) {
+    return this.orgs.getMine(req.user.sub);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Карточка организации' })
   async get(@Param('id') id: string) {
@@ -102,15 +113,7 @@ export class OrganizationsController {
   }
 
   // ═══ ORG_MANAGER PORTAL ════════════════════════════════════════════════════
-
-  @Get('mine')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ORG_MANAGER)
-  @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: '[ORG_MANAGER] Моя организация' })
-  getMine(@Request() req: any) {
-    return this.orgs.getMine(req.user.sub);
-  }
+  // (GET mine объявлен выше, до роута ':id')
 
   @Patch('mine')
   @UseGuards(JwtAuthGuard, RolesGuard)

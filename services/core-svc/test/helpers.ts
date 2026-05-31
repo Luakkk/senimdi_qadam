@@ -16,13 +16,9 @@ export interface E2EContext {
  * заглушкой, чтобы register() не пытался реально слать письмо.
  */
 export async function bootstrapE2E(): Promise<E2EContext> {
-  // eslint-disable-next-line no-console
-  console.error('[e2e] compiling module...');
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
-  // eslint-disable-next-line no-console
-  console.error('[e2e] module compiled, creating app...');
 
   const app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api');
@@ -40,11 +36,7 @@ export async function bootstrapE2E(): Promise<E2EContext> {
     emails: { send: async () => ({ id: 'test-email-id' }) },
   };
 
-  // eslint-disable-next-line no-console
-  console.error('[e2e] calling app.init() (поднимаем onModuleInit всех модулей)...');
   await app.init();
-  // eslint-disable-next-line no-console
-  console.error('[e2e] app.init() OK');
 
   const prisma = app.get(PrismaService);
   return { app, prisma };
