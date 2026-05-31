@@ -36,7 +36,11 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
 
     // 1. Пробуем отдать из Redis (избегаем DB запрос на каждый запрос)
     const cached = await this.redis.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    if (cached) {
+      const u = JSON.parse(cached);
+      // sub — алиас userId; контроллеры обращаются к req.user.sub
+      return { ...u, sub: u.id };
+    }
 
     // 2. Cache miss — идём в DB, но только нужные поля (не SELECT *)
     const user = await this.prisma.user.findUnique({
@@ -63,6 +67,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     // 3. Кэшируем на 5 минут — при logout инвалидируется
     await this.redis.set(cacheKey, JSON.stringify(user), USER_CTX_TTL);
 
-    return user; // будет доступен как req.user
+    // sub — алиас userId; контроллеры обращаются к req.user.sub
+    return { ...user, sub: user.id }; // будет доступен как req.user
   }
 }
