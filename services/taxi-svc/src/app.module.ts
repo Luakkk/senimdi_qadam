@@ -47,12 +47,14 @@ import { RecurringService } from './recurring/recurring.service';
     }),
   ],
   controllers: [
+    // ВАЖНО: RecurringController (роуты bookings/recurring) должен идти ДО
+    // BookingsController, иначе GET bookings/:id перехватит /bookings/recurring → 404.
+    RecurringController,
     BookingsController,
     ManagerController,
     ChatController,
     DriversController,
     ManagerAuthController,
-    RecurringController,
   ],
   providers: [
     JwtStrategy,

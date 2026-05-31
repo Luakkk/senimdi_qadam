@@ -1,0 +1,22 @@
+# Изолированная тестовая инфраструктура для E2E taxi-svc.
+# Postgres (5436) и Redis (6381) на НЕконфликтующих портах
+# (чтобы не задеть ни рабочую БД, ни тестовую core-svc на 5433/6380).
+#   docker compose -f docker-compose.test.yml up -d
+services:
+  taxi-test-db:
+    image: postgres:16-alpine
+    container_name: taxi-test-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: taxi_db_test
+    ports:
+      - "5436:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  taxi-test-redis:
+    image: redis:7-alpine
+    container_name: taxi-test-redis
+    ports:
+      - "6381:6379"
