@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildCursorPage } from '../common/dto/cursor-pagination.dto';
 
@@ -69,7 +70,7 @@ export class NotificationsService {
         title:  params.title,
         body:   params.body,
         type:   params.type,
-        data:   params.data ?? null,
+        data:   params.data ? (params.data as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
   }
@@ -88,7 +89,7 @@ export class NotificationsService {
         title:  params.title,
         body:   params.body,
         type:   params.type,
-        data:   params.data ?? null,
+        data:   params.data ? (params.data as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
   }

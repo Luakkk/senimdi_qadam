@@ -5,6 +5,9 @@ import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { MessageSender } from '@prisma/client';
 
 const mockPrisma = {
+  taxiManager: {
+    findUnique: jest.fn().mockResolvedValue({ id: 'mgr-profile-1' }),
+  },
   booking: {
     findUnique: jest.fn(),
     findFirst:  jest.fn(),

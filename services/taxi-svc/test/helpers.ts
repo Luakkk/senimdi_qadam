@@ -2,9 +2,11 @@ import { ValidationPipe, INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import * as jwt from 'jsonwebtoken';
 import { AppModule } from '../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
 
 export interface E2EContext {
   app: INestApplication;
+  prisma: PrismaService;
 }
 
 /**
@@ -27,7 +29,8 @@ export async function bootstrapE2E(): Promise<E2EContext> {
   );
 
   await app.init();
-  return { app };
+  const prisma = app.get(PrismaService);
+  return { app, prisma };
 }
 
 /**

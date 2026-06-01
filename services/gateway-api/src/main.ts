@@ -68,14 +68,27 @@ async function bootstrap() {
   const coreSvcUrl = process.env.CORE_SVC_URL || 'http://localhost:3001';
   const aiSvcUrl   = process.env.AI_SVC_URL   || 'http://localhost:8000';
 
+  // core-svc слушает с globalPrefix('api') → сохраняем /api (срезаем только /core).
+  // ВАЖНО: при строковом mount Express обрезает mount-путь и http-proxy-middleware
+  // видит req.url === '/'. Поэтому переписываем путь функцией по req.originalUrl
+  // (полный путь), а не строковым правилом по обрезанному req.url.
   expressApp.use('/api/core/profile/me/avatar',
-    createProxyMiddleware({ target: coreSvcUrl, changeOrigin: true, pathRewrite: { '^/api/core': '' } }),
+    createProxyMiddleware({
+      target: coreSvcUrl, changeOrigin: true,
+      pathRewrite: (_p, req: any) => req.originalUrl.replace(/^\/api\/core/, '/api'),
+    }),
   );
   expressApp.use(/^\/api\/core\/news\/[^/]+\/image$/,
-    createProxyMiddleware({ target: coreSvcUrl, changeOrigin: true, pathRewrite: { '^/api/core': '' } }),
+    createProxyMiddleware({
+      target: coreSvcUrl, changeOrigin: true,
+      pathRewrite: (_p, req: any) => req.originalUrl.replace(/^\/api\/core/, '/api'),
+    }),
   );
   expressApp.use('/api/ai/speech/transcribe',
-    createProxyMiddleware({ target: aiSvcUrl, changeOrigin: true, pathRewrite: { '^/api/ai': '' } }),
+    createProxyMiddleware({
+      target: aiSvcUrl, changeOrigin: true,
+      pathRewrite: (_p, req: any) => req.originalUrl.replace(/^\/api\/ai/, ''),
+    }),
   );
 
   // ── WebSocket proxy → taxi-svc (/taxi namespace) ──────────────────────────

@@ -52,15 +52,19 @@ export class ChatService {
   }
 
   // ─── Отправить сообщение от менеджера ─────────────────────────────────────
-  async sendAsManager(managerId: string, bookingId: string, dto: SendMessageDto) {
+  async sendAsManager(userId: string, bookingId: string, dto: SendMessageDto) {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (!booking) throw new NotFoundException('Заявка не найдена');
+
+    // managerId — FK на TaxiManager.id, а из токена приходит userId (sub).
+    // Резолвим профиль менеджера; senderId хранит исходный userId отправителя.
+    const manager = await this.prisma.taxiManager.findUnique({ where: { userId } });
 
     return this.prisma.bookingMessage.create({
       data: {
         bookingId,
-        managerId,
-        senderId: managerId,
+        managerId: manager?.id ?? null,
+        senderId: userId,
         senderType: MessageSender.MANAGER,
         text: dto.text,
       },

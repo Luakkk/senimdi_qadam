@@ -66,8 +66,14 @@ export class ManagerService {
   // Используем транзакцию + условный UPDATE для защиты от гонки условий:
   // если два менеджера одновременно пытаются назначить водителя на одну заявку,
   // updateMany вернёт count=0 для второго — он получит ошибку.
-  async assignDriver(managerId: string, bookingId: string, dto: AssignDriverDto) {
+  async assignDriver(userId: string, bookingId: string, dto: AssignDriverDto) {
     return this.prisma.$transaction(async (tx) => {
+      // 0. managerId в Booking — это FK на TaxiManager.id, а из токена приходит
+      // userId (sub). Резолвим профиль менеджера по userId. У ADMIN профиля
+      // TaxiManager может не быть — тогда managerId остаётся null (FK nullable).
+      const manager = await tx.taxiManager.findUnique({ where: { userId } });
+      const managerId = manager?.id ?? null;
+
       // 1. Проверяем наличие заявки и водителя (внутри транзакции)
       const booking = await tx.booking.findUnique({ where: { id: bookingId } });
       if (!booking) throw new NotFoundException('Заявка не найдена');

@@ -235,6 +235,13 @@ services:
     networks:
       - backend   # проксирует запросы к сервисам
       - admin     # прямой доступ к core_db + taxi_db для AdminJS
+    healthcheck:
+      # node:20-alpine содержит busybox wget; /api/health — собственный роут шлюза
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       core_db:
         condition: service_healthy
@@ -276,8 +283,9 @@ services:
       - backend       # inter-service (redis, core-svc для валидации токенов)
       - ai_db_net     # изолированный доступ к ai_db
     healthcheck:
-      # FastAPI регистрирует /health в main.py
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      # python:3.11-slim НЕ содержит wget/curl, поэтому проверяем через сам python
+      # (он гарантированно есть). FastAPI регистрирует /health в main.py.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
       interval: 15s
       timeout: 5s
       retries: 5

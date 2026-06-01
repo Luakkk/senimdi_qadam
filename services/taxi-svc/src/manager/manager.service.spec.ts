@@ -61,6 +61,7 @@ describe('ManagerService', () => {
     it('should throw NotFoundException if booking not found', async () => {
       mockPrisma.$transaction.mockImplementation(async (fn: any) =>
         fn({
+          taxiManager: { findUnique: jest.fn().mockResolvedValue({ id: 'mgr-1' }) },
           booking: { findUnique: jest.fn().mockResolvedValue(null) },
           driver:  { findUnique: jest.fn() },
         }),
@@ -71,6 +72,7 @@ describe('ManagerService', () => {
     it('should throw BadRequestException if booking is not PENDING', async () => {
       mockPrisma.$transaction.mockImplementation(async (fn: any) =>
         fn({
+          taxiManager: { findUnique: jest.fn().mockResolvedValue({ id: 'mgr-1' }) },
           booking: { findUnique: jest.fn().mockResolvedValue({ id: 'b1', status: 'CONFIRMED' }), updateMany: jest.fn() },
           driver:  { findUnique: jest.fn() },
         }),
@@ -81,6 +83,7 @@ describe('ManagerService', () => {
     it('should throw BadRequestException if driver not found', async () => {
       mockPrisma.$transaction.mockImplementation(async (fn: any) =>
         fn({
+          taxiManager: { findUnique: jest.fn().mockResolvedValue({ id: 'mgr-1' }) },
           booking: { findUnique: jest.fn().mockResolvedValue({ id: 'b1', status: 'PENDING' }), updateMany: jest.fn() },
           driver:  { findUnique: jest.fn().mockResolvedValue(null) },
         }),

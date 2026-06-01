@@ -38,23 +38,9 @@ export class BookingsController {
     return this.bookingsService.getMyBookings(req.user.sub);
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Детали заявки (с сообщениями)' })
-  getOne(@Req() req: any, @Param('id') id: string) {
-    return this.bookingsService.getOne(req.user.sub, id);
-  }
-
-  @Patch(':id/cancel')
-  @ApiOperation({ summary: 'Отменить заявку' })
-  cancel(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Query('reason') reason?: string,
-  ) {
-    return this.bookingsService.cancel(req.user.sub, id, reason);
-  }
-
   // ── Расчёт стоимости поездки ──────────────────────────────────────────────
+  // ВАЖНО: статичный роут 'estimate-price' должен идти ДО ':id', иначе
+  // GET /bookings/estimate-price перехватится роутом ':id' → getOne → 404.
   @Get('estimate-price')
   @ApiOperation({ summary: 'Предварительный расчёт стоимости поездки' })
   @ApiQuery({ name: 'fromLat',       type: Number })
@@ -74,6 +60,22 @@ export class BookingsController {
       parseFloat(toLat),   parseFloat(toLon),
       disabilityType,
     );
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Детали заявки (с сообщениями)' })
+  getOne(@Req() req: any, @Param('id') id: string) {
+    return this.bookingsService.getOne(req.user.sub, id);
+  }
+
+  @Patch(':id/cancel')
+  @ApiOperation({ summary: 'Отменить заявку' })
+  cancel(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Query('reason') reason?: string,
+  ) {
+    return this.bookingsService.cancel(req.user.sub, id, reason);
   }
 
   // ── Инициировать оплату ───────────────────────────────────────────────────

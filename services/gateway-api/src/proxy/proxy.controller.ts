@@ -8,12 +8,27 @@ import { Request, Response } from 'express';
 export class ProxyController {
   constructor(private proxy: ProxyService) {}
 
-  // Вырезаем префикс (/core, /taxi, /ai) и сохраняем путь + query string
-  // Пример: /core/organizations?limit=20  →  /organizations?limit=20
+  // Префикс пути НА СТОРОНЕ UPSTREAM (не путать с маршрутом шлюза):
+  //   • core-svc поднят с globalPrefix('api') → слушает на /api/*
+  //   • taxi-svc и ai-svc — без префикса        → слушают на /*
+  // Поэтому при проксировании core мы ДОЛЖНЫ сохранить /api, а для taxi/ai — убрать.
+  private static readonly UPSTREAM_PREFIX: Record<string, string> = {
+    core: '/api',
+    taxi: '',
+    ai: '',
+  };
+
+  // Снимаем маршрут шлюза (/api/core, /api/taxi, /api/ai) и подставляем
+  // собственный префикс upstream-сервиса. Сохраняем путь + query string.
+  //   /api/core/auth/register  → /api/auth/register   (core: globalPrefix 'api')
+  //   /api/taxi/bookings       → /bookings            (taxi: без префикса)
+  //   /api/ai/chat/guide       → /chat/guide          (ai:   без префикса)
   private extractPath(url: string, prefix: string): string {
-    // url приходит без /api (globalPrefix уже снят NestJS)
-    const cut = url.replace(new RegExp(`^\\/${prefix}`), '') || '/';
-    return cut.startsWith('/') ? cut : `/${cut}`;
+    // ВАЖНО: NestJS НЕ срезает globalPrefix('api') из req.url, поэтому
+    // снимаем опциональный /api вместе с маршрутом сервиса.
+    const rest = url.replace(new RegExp(`^(?:\\/api)?\\/${prefix}`), '') || '/';
+    const tail = rest.startsWith('/') ? rest : `/${rest}`;
+    return `${ProxyController.UPSTREAM_PREFIX[prefix] ?? ''}${tail}`;
   }
 
   // ─── core-svc :3001 ───────────────────────────────────────────────────────

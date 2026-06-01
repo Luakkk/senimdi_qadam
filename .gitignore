@@ -50,3 +50,9 @@ services/taxi-svc/generated/
 1*export
 *export
 package-lock 2.json
+
+# ── Prisma generated clients / engines ───────────────────────
+generated/
+**/generated/
+*.node
+*.dylib
