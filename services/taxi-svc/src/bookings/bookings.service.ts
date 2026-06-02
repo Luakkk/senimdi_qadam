@@ -268,9 +268,13 @@ export class BookingsService {
   //    2. Сверить сумму и orderId с данными в БД (защита от подмены суммы).
   //    3. Ответить 200 OK только после успешной проверки.
   //
-  async confirmPayment(bookingId: string, transactionId: string) {
+  async confirmPayment(bookingId: string, transactionId: string, userId: string) {
+    // ⚠ Защита от подтверждения чужой оплаты: транзакция должна принадлежать
+    //    вызывающему пользователю. Без этого любой авторизованный клиент мог
+    //    пометить чужую бронь оплаченной (см. test_behavior.sh п.3).
+    //    В production webhook от шлюза вместо userId проверяет HMAC-подпись.
     const tx = await this.prisma.paymentTransaction.findFirst({
-      where: { id: transactionId, bookingId },
+      where: { id: transactionId, bookingId, userId },
     });
     if (!tx) throw new NotFoundException('Транзакция не найдена');
 

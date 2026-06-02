@@ -22,6 +22,7 @@ import { ApiExcludeController } from '@nestjs/swagger';
 import { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RedisService } from '../redis/redis.service';
 import { Role } from '@prisma/client';
 
 /**
@@ -51,6 +52,7 @@ export class InternalController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly redis: RedisService,
   ) {}
 
   /**
@@ -82,6 +84,8 @@ export class InternalController {
       where: { id: userId },
       data: { role: Role.TAXI_MANAGER },
     });
+    // Сбрасываем кэш контекста — иначе guard будет видеть старую роль USER до 5 мин.
+    await this.redis.invalidateUserCtx(userId);
 
     return { success: true, userId, role: Role.TAXI_MANAGER };
   }

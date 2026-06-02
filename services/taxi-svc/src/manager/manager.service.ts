@@ -1,7 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { BookingStatus } from '@prisma/client';
@@ -143,7 +142,8 @@ export class ManagerService {
 
     const allowedNext = allowed[booking.status];
     if (!allowedNext || !allowedNext.includes(dto.status)) {
-      throw new ForbiddenException(
+      // 400, а не 403: вызывающий имеет права, недопустим сам переход состояния.
+      throw new BadRequestException(
         `Переход ${booking.status} → ${dto.status} недопустим`,
       );
     }

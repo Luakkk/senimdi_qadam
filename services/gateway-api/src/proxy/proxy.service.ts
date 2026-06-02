@@ -36,6 +36,10 @@ export class ProxyService {
     // Пробрасываем авторизацию
     if (headers?.authorization)   forwardHeaders['authorization']   = headers.authorization;
     if (headers?.['x-user-id'])   forwardHeaders['x-user-id']       = headers['x-user-id'];
+    // Локализация: core-svc выбирает язык ответа (ru/kk) по Accept-Language
+    // (language.middleware + language.interceptor). Без проброса все запросы
+    // через шлюз молча получают дефолтный 'ru' — казахская версия недостижима.
+    if (headers?.['accept-language']) forwardHeaders['accept-language'] = headers['accept-language'];
     // Content-Type только для не-multipart запросов (multipart идёт через raw proxy)
     if (!headers?.['content-type']?.includes('multipart')) {
       forwardHeaders['content-type'] = 'application/json';

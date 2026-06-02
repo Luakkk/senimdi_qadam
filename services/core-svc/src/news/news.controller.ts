@@ -144,7 +144,8 @@ export class NewsController {
         const allowedMime = /^image\/(jpeg|png|webp)$/;
         const allowedExt  = /\.(jpg|jpeg|png|webp)$/i;
         if (!allowedMime.test(file.mimetype) || !allowedExt.test(file.originalname)) {
-          return cb(new Error('Только JPG, PNG или WebP'), false);
+          // BadRequestException (а не голый Error) → Nest вернёт 400, а не 500.
+          return cb(new BadRequestException('Только JPG, PNG или WebP'), false);
         }
         cb(null, true);
       },

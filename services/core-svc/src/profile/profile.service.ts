@@ -24,7 +24,7 @@ export class ProfileService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { profile: true },
-      omit: { passwordHash: true },
+      omit: { passwordHash: true, totpSecret: true },
     });
     if (!user) throw new NotFoundException('Пользователь не найден');
     return user;
@@ -164,11 +164,11 @@ export class ProfileService {
     const [asGuardian, asDependent] = await Promise.all([
       this.prisma.relativeLink.findMany({
         where: { guardianId: userId },
-        include: { dependent: { include: { profile: true }, omit: { passwordHash: true } } },
+        include: { dependent: { include: { profile: true }, omit: { passwordHash: true, totpSecret: true } } },
       }),
       this.prisma.relativeLink.findMany({
         where: { dependentId: userId },
-        include: { guardian: { include: { profile: true }, omit: { passwordHash: true } } },
+        include: { guardian: { include: { profile: true }, omit: { passwordHash: true, totpSecret: true } } },
       }),
     ]);
     return { asGuardian, asDependent };

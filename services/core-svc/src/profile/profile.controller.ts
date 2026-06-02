@@ -67,7 +67,8 @@ export class ProfileController {
       limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
-          return cb(new Error('Только JPG, PNG или WebP'), false);
+          // BadRequestException (а не голый Error) → Nest вернёт 400, а не 500.
+          return cb(new BadRequestException('Только JPG, PNG или WebP'), false);
         }
         cb(null, true);
       },

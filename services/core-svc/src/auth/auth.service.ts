@@ -301,7 +301,8 @@ export class AuthService {
     return this.prisma.user.findUnique({
       where: { id: userId },
       include: { profile: true },
-      omit: { passwordHash: true },
+      // totpSecret тоже исключаем — это секрет 2FA (даже зашифрованный не должен утекать в API)
+      omit: { passwordHash: true, totpSecret: true },
     });
   }
 

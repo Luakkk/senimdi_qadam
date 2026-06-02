@@ -92,8 +92,12 @@ export class BookingsController {
   // ── Подтвердить оплату (webhook) ──────────────────────────────────────────
   @Patch(':id/payment/:txId/confirm')
   @ApiOperation({ summary: 'Подтвердить оплату (вызывается платёжным шлюзом или вручную)' })
-  confirmPayment(@Param('id') id: string, @Param('txId') txId: string) {
-    return this.bookingsService.confirmPayment(id, txId);
+  confirmPayment(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Param('txId') txId: string,
+  ) {
+    return this.bookingsService.confirmPayment(id, txId, req.user.sub);
   }
 
   // ── GET /bookings/:id/driver-location ─────────────────────────────────────

@@ -8,7 +8,9 @@ import {
 import { NewsStatus, NewsCommentStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FcmService } from '../fcm/fcm.service';
-import DOMPurify from 'isomorphic-dompurify';
+// namespace-импорт: пакет экспортит объект через module.exports (без .default),
+// а в tsconfig нет esModuleInterop → дефолтный импорт давал undefined.sanitize (500).
+import * as DOMPurify from 'isomorphic-dompurify';
 import { buildCursorPage } from '../common/dto/cursor-pagination.dto';
 import { CreateNewsDto } from './dto/create-news.dto';
 import { ModerateNewsDto } from './dto/moderate-news.dto';

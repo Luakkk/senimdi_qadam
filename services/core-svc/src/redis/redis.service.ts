@@ -81,6 +81,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.del(key);
   }
 
+  /**
+   * Сброс кэша контекста пользователя (роль/isActive), который читает JwtStrategy.
+   * ОБЯЗАТЕЛЬНО вызывать при смене роли, бане/разбане и любом изменении,
+   * влияющем на доступ — иначе guard будет видеть старую роль до истечения TTL.
+   */
+  async invalidateUserCtx(userId: string) {
+    await this.client.del(`user_ctx:${userId}`);
+  }
+
   /** Атомарно читает и удаляет ключ (Redis GETDEL). Одноразовое чтение. */
   async getdel(key: string): Promise<string | null> {
     return this.client.getdel(key);

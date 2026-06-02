@@ -25,7 +25,8 @@ export class ManagerAuthService {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const res = await fetch(`${coreSvcUrl}/internal/users/${userId}/promote-taxi-manager`, {
+        // core-svc вешает все маршруты под globalPrefix 'api' → путь /api/internal/...
+        const res = await fetch(`${coreSvcUrl}/api/internal/users/${userId}/promote-taxi-manager`, {
           method: 'PATCH',
           headers: { 'x-internal-key': adminKey },
         });

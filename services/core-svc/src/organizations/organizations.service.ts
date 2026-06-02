@@ -91,6 +91,8 @@ export class OrganizationsService {
       where: { id: userId },
       data:  { role: Role.ORG_MANAGER },
     });
+    // Сбрасываем кэш контекста — иначе guard будет видеть старую роль USER до 5 мин.
+    await this.redis.invalidateUserCtx(userId);
 
     return {
       message: 'Заявка принята. Администратор рассмотрит её в течение 3–5 рабочих дней.',

@@ -23,7 +23,8 @@ requests>=2.31.0
 
 # ── TTS: Microsoft Edge TTS (бесплатно, без API ключей) ──────────────────────
 # Голоса: ru-RU-SvetlanaNeural, kk-KZ-AigulNeural
-edge-tts==6.1.12
+# 7.x обязателен: 6.1.12 не отправляет Sec-MS-GEC токен → 403 от Microsoft.
+edge-tts==7.2.8
 
 # ── STT: OpenAI Whisper (локально, бесплатно, CPU) ───────────────────────────
 # Модель: small (~150MB), язык: ru / kk

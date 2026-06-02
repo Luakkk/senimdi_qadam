@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
 
 @Injectable()
 export class AdminUsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
 
   async findAll(params: {
     q?: string;
@@ -56,11 +60,14 @@ export class AdminUsersService {
 
   async updateRole(id: string, role: Role) {
     await this.findOne(id);
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { role },
       select: { id: true, email: true, role: true },
     });
+    // Сбрасываем кэш контекста — иначе guard будет видеть старую роль до 5 мин.
+    await this.redis.invalidateUserCtx(id);
+    return updated;
   }
 
   async toggleBan(id: string) {
@@ -70,6 +77,8 @@ export class AdminUsersService {
       data: { isActive: !user.isActive },
       select: { id: true, email: true, isActive: true },
     });
+    // Сбрасываем кэш — иначе забаненный сохранит доступ до истечения TTL.
+    await this.redis.invalidateUserCtx(id);
     return updated;
   }
 }

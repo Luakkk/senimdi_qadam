@@ -175,8 +175,14 @@ def search_organizations(query: str, lat: Optional[float] = None, lon: Optional[
         if category_filter:
             params["category"] = category_filter
 
+        # core-svc монтирует все роуты под globalPrefix '/api'.
+        # CORE_SVC_URL в docker-compose = http://core-svc:3001 (без /api),
+        # поэтому добавляем /api здесь — иначе 404 и поиск молча вернёт [].
+        base = settings.CORE_SVC_URL.rstrip("/")
+        if not base.endswith("/api"):
+            base += "/api"
         resp = httpx.get(
-            f"{settings.CORE_SVC_URL}/organizations/search",
+            f"{base}/organizations/search",
             params=params,
             timeout=5.0,
         )

@@ -197,7 +197,12 @@ export class AdminOrganizationsService {
   // ── DELETE ──────────────────────────────────────────────────────────────
   async remove(id: string) {
     await this.findOne(id);
-    await this.prisma.organization.delete({ where: { id } });
+    // VerificationLog НЕ имеет onDelete:Cascade (в отличие от savedBy/reviews/services),
+    // поэтому удаляем логи вручную в транзакции — иначе FK-ограничение → 500.
+    await this.prisma.$transaction([
+      this.prisma.verificationLog.deleteMany({ where: { organizationId: id } }),
+      this.prisma.organization.delete({ where: { id } }),
+    ]);
     return { message: 'Organization deleted' };
   }
 
