@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   UnauthorizedException,
   ConflictException,
   BadRequestException,
@@ -23,6 +24,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 @Injectable()
 export class AuthService {
   private resend: Resend;
+  private readonly logger = new Logger(AuthService.name);
 
   constructor(
     private prisma: PrismaService,
@@ -59,13 +61,16 @@ export class AuthService {
       include: { profile: true },
     });
 
-    // Отправляем письмо с подтверждением email
-    await this.sendVerificationEmail(user.id, user.email);
+    // Отправляем 6-значный код подтверждения email на почту
+    const code = await this.sendVerificationCode(user.email);
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
     // Сохраняем refresh в Redis (highload: возможность отзыва)
     await this.redis.setRefreshToken(user.id, tokens.refreshToken);
-    return tokens;
+
+    // В DEV-режиме (EXPOSE_VERIFICATION_CODE=true) возвращаем код прямо в ответе,
+    // чтобы можно было протестировать без рабочего почтового отправителя.
+    return this.exposeCode() ? { ...tokens, devCode: code } : tokens;
   }
 
   // ─── LOGIN ─────────────────────────────────────────────────────────────────
@@ -284,6 +289,30 @@ export class AuthService {
     return { message: 'Email успешно подтверждён! Теперь вы можете войти.' };
   }
 
+  /** Подтверждение email по 6-значному коду (введённому при регистрации) */
+  async verifyEmailCode(email: string, code: string) {
+    if (!email || !code) {
+      throw new BadRequestException('email и code обязательны');
+    }
+
+    // Атомарный GETDEL: код одноразовый, повторно использовать нельзя
+    const stored = await this.redis.getAndDeleteVerificationCode(email);
+    if (!stored || stored !== code) {
+      throw new BadRequestException('Неверный или просроченный код');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) throw new NotFoundException('Пользователь не найден');
+    if (user.isVerified) return { message: 'Email уже подтверждён' };
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data:  { isVerified: true },
+    });
+
+    return { message: 'Email успешно подтверждён! Теперь вы можете войти.' };
+  }
+
   async resendVerification(email: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
 
@@ -292,8 +321,9 @@ export class AuthService {
       return { message: 'Если email существует и не подтверждён — письмо отправлено' };
     }
 
-    await this.sendVerificationEmail(user.id, user.email);
-    return { message: 'Если email существует и не подтверждён — письмо отправлено' };
+    const code = await this.sendVerificationCode(user.email);
+    const base = { message: 'Если email существует и не подтверждён — письмо отправлено' };
+    return this.exposeCode() ? { ...base, devCode: code } : base;
   }
 
   // ─── GET ME ────────────────────────────────────────────────────────────────
@@ -404,6 +434,47 @@ export class AuthService {
   }
 
   // ─── HELPERS ──────────────────────────────────────────────────────────────
+
+  /** В DEV-режиме код подтверждения возвращается прямо в API-ответе.
+   *  Включается переменной окружения EXPOSE_VERIFICATION_CODE=true.
+   *  В продакшене ОБЯЗАТЕЛЬНО выключить (код должен приходить только на почту). */
+  private exposeCode(): boolean {
+    return this.config.get('EXPOSE_VERIFICATION_CODE') === 'true';
+  }
+
+  /** Генерирует 6-значный код, сохраняет в Redis (TTL 24ч) и отправляет на почту.
+   *  Возвращает код (для DEV-режима / логирования). */
+  private async sendVerificationCode(email: string): Promise<string> {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    await this.redis.setVerificationCode(email, code);
+
+    // Лог для отладки (код виден в логах core-svc даже без рабочей почты)
+    this.logger.log(`Код подтверждения для ${email}: ${code}`);
+
+    try {
+      await this.resend.emails.send({
+        from: this.config.get('EMAIL_FROM') || 'onboarding@resend.dev',
+        to:   email,
+        subject: 'Код подтверждения email — SenimdiQAdam',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto;">
+            <h2 style="color: #2563eb;">SenimdiQAdam</h2>
+            <p>Добро пожаловать! Для активации аккаунта введите код подтверждения:</p>
+            <div style="background: #f1f5f9; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0;">
+              <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #1e293b;">${code}</span>
+            </div>
+            <p style="color: #64748b;">Код действителен <strong>24 часа</strong>.</p>
+            <p style="color: #64748b;">Если вы не регистрировались — проигнорируйте это письмо.</p>
+          </div>
+        `,
+      });
+    } catch (e: any) {
+      // Не валим регистрацию если письмо не ушло — код всё равно в Redis и в логах
+      this.logger.warn(`Не удалось отправить письмо с кодом на ${email}: ${e?.message}`);
+    }
+
+    return code;
+  }
 
   /** Генерирует UUID-токен, сохраняет в Redis и отправляет письмо-подтверждение */
   private async sendVerificationEmail(userId: string, email: string) {

@@ -97,10 +97,20 @@ export class AuthController {
     return this.authService.verifyEmail(token);
   }
 
+  @Post('verify-code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @ApiOperation({ summary: 'Подтвердить email по 6-значному коду из письма' })
+  @ApiResponse({ status: 200, description: 'Email подтверждён' })
+  @ApiResponse({ status: 400, description: 'Неверный или просроченный код' })
+  verifyEmailCode(@Body() body: { email: string; code: string }) {
+    return this.authService.verifyEmailCode(body.email, body.code);
+  }
+
   @Post('resend-verification')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 3, ttl: 60000 } })
-  @ApiOperation({ summary: 'Повторно отправить письмо-подтверждение' })
+  @ApiOperation({ summary: 'Повторно отправить код подтверждения' })
   resendVerification(@Body() body: { email: string }) {
     return this.authService.resendVerification(body.email);
   }

@@ -127,4 +127,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async getAndDeleteVerificationToken(token: string): Promise<string | null> {
     return this.client.getdel(`verify:${token}`);
   }
+
+  // ── Email verification CODES (6-значный код при регистрации) ───────────────
+  // key: verifycode:{email}  →  value: 6-значный код  (TTL 24 часа)
+  async setVerificationCode(email: string, code: string, ttlSeconds = 60 * 60 * 24) {
+    await this.client.set(`verifycode:${email}`, code, 'EX', ttlSeconds);
+  }
+
+  /** Атомарно читает и удаляет код подтверждения email (одноразовый) */
+  async getAndDeleteVerificationCode(email: string): Promise<string | null> {
+    return this.client.getdel(`verifycode:${email}`);
+  }
 }
