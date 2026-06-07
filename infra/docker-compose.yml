@@ -233,6 +233,7 @@ services:
       REDIS_PORT:          6379
       REDIS_PASSWORD:      ${REDIS_PASSWORD}
       FRONTEND_URL:        ${FRONTEND_URL:-http://localhost:5173}
+      ALLOWED_ORIGINS:     ${ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
     networks:
       - backend   # проксирует запросы к сервисам
       - admin     # прямой доступ к core_db + taxi_db для AdminJS
